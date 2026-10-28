@@ -1,33 +1,68 @@
 /**
- * Render build when Root Directory is empty OR mistakenly set to "src".
- * Run as: node ../scripts/render-build.mjs (from src) OR npm run build:render (from repo root)
+ * Render production build. Works with Root Directory empty or "src".
  */
 import { execSync } from 'child_process';
 import { cpSync, existsSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+function findRepoRoot() {
+  const candidates = [dirname(fileURLToPath(import.meta.url)), process.cwd()];
+  for (const start of candidates) {
+    let dir = start;
+    for (let i = 0; i < 8; i++) {
+      if (existsSync(join(dir, 'package.json')) && existsSync(join(dir, 'nest-cli.json'))) {
+        return dir;
+      }
+      const up = join(dir, '..');
+      if (up === dir) break;
+      dir = up;
+    }
+  }
+  throw new Error('[render-build] Could not find repo root (package.json + nest-cli.json)');
+}
 
+function findDistMain(repoRoot) {
+  const paths = [
+    join(repoRoot, 'dist', 'main.js'),
+    join(repoRoot, 'src', 'dist', 'main.js'),
+  ];
+  for (const p of paths) {
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+const repoRoot = findRepoRoot();
 console.log('[render-build] repoRoot:', repoRoot);
+console.log('[render-build] cwd:', process.cwd());
 
-execSync('npm ci', { cwd: repoRoot, stdio: 'inherit' });
-execSync('npm run build', { cwd: repoRoot, stdio: 'inherit' });
+const env = { ...process.env, NPM_CONFIG_PRODUCTION: 'false' };
 
-const builtMain = join(repoRoot, 'dist', 'main.js');
-if (!existsSync(builtMain)) {
-  console.error('[render-build] Missing', builtMain);
+execSync('npm ci --include=dev', { cwd: repoRoot, stdio: 'inherit', env });
+execSync('npx nest build', { cwd: repoRoot, stdio: 'inherit', env });
+
+let mainPath = findDistMain(repoRoot);
+if (!mainPath) {
+  console.error('[render-build] nest build finished but dist/main.js not found.');
+  console.error('[render-build] Checked:', join(repoRoot, 'dist', 'main.js'), join(repoRoot, 'src', 'dist', 'main.js'));
   process.exit(1);
 }
 
-/** If Render Root Directory is "src", only src/ is deployed — mirror dist there */
+console.log('[render-build] Built:', mainPath);
+
 const srcDir = join(repoRoot, 'src');
-const nestSource = existsSync(join(srcDir, 'main.ts')) || existsSync(join(srcDir, 'app.module.ts'));
-if (nestSource) {
-  const dest = join(srcDir, 'dist');
-  console.log('[render-build] Copying dist → src/dist (for Root Directory = src on Render)');
-  rmSync(dest, { recursive: true, force: true });
-  cpSync(join(repoRoot, 'dist'), dest, { recursive: true });
+const deployDist = join(srcDir, 'dist');
+if (existsSync(join(srcDir, 'main.ts')) && !mainPath.includes(`${join('src', 'dist')}`)) {
+  console.log('[render-build] Copying dist → src/dist (Render Root Directory = src)');
+  rmSync(deployDist, { recursive: true, force: true });
+  cpSync(join(repoRoot, 'dist'), deployDist, { recursive: true });
+  mainPath = join(deployDist, 'main.js');
 }
 
-console.log('[render-build] OK — dist/main.js at repo root; src/dist if needed');
+if (!existsSync(mainPath)) {
+  console.error('[render-build] Missing entry after copy:', mainPath);
+  process.exit(1);
+}
+
+console.log('[render-build] OK — use start command: npm run start:prod');
