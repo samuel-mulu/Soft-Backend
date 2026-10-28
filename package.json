@@ -9,7 +9,7 @@
     "postinstall": "prisma generate",
     "start:dev": "nest start --watch",
     "build": "nest build",
-    "start": "node dist/src/main.js",
+    "start": "node dist/main.js",
     "prisma:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:deploy": "prisma db push",
