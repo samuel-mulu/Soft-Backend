@@ -1,0 +1,29 @@
+# Render Blueprint — Web Service (NestJS API)
+# Docs: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: flowstock-api
+    runtime: node
+    region: frankfurt
+    plan: free
+    # If this API lives in a monorepo, set rootDir to e.g. softdrink-backend
+    rootDir: .
+    buildCommand: npm ci && npm run build
+    preDeployCommand: npx prisma db push
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        sync: false
+      - key: CORS_ALLOW_VERCEL
+        value: "true"
+      - key: SEED_OWNER_USERNAME
+        value: owner
+      - key: SEED_OWNER_PASSWORD
+        sync: false
