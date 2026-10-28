@@ -10,7 +10,7 @@ services:
     # Monorepo only: rootDir: softdrink-backend
     buildCommand: npm ci && npm run build
     preDeployCommand: npx prisma db push
-    startCommand: npm run start
+    startCommand: npm run start:prod
     healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
