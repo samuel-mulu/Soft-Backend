@@ -65,7 +65,7 @@ Connect the **Soft-Backend** GitHub repo as a **Web Service**.
 
 | Setting | Value |
 |--------|--------|
-| **Root Directory** | **Leave empty** — do **not** set `src`. If Root Directory is `src`, start fails with `Cannot find module .../src/dist/main.js`. |
+| **Root Directory** | **Leave completely empty** (delete `src` if shown). Wrong setting → `Cannot find module .../project/src/dist/main.js`. |
 | **Build Command** | `npm ci && npm run build` |
 | **Start Command** | `npm run start` or `npm run start:prod` |
 | **Pre-deploy / Release** | `npx prisma db push` |
