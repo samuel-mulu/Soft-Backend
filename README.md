@@ -59,6 +59,22 @@ Open http://localhost:4000/docs . All API endpoints are prefixed with `/api`.
 
 **Limitations / important accounting notes:** This starter does not implement invoice voids, refunds, sale corrections, FIFO inventory valuation, formal double-entry accounting, or a customer login portal. Profit uses the recorded default product cost snapshot at sale time, not FIFO actual batch cost. Bottle corrections affect the customer ledger only; if physical warehouse bottles also change, make a separate inventory adjustment. The system assumes 1 returnable bottle per drink. For credit or bottle tracking, use a registered customer. Customer payments without `saleId` settle the overall customer balance, not a specific invoice. Date ranges are UTC. Production deployment requires testing, backups, and additional operational hardening.
 
+## Deploy on Render
+
+Connect the **Soft-Backend** GitHub repo as a **Web Service**.
+
+| Setting | Value |
+|--------|--------|
+| **Root Directory** | **Leave empty** — do **not** set `src`. If Root Directory is `src`, start fails with `Cannot find module .../src/dist/main.js`. |
+| **Build Command** | `npm ci && npm run build` |
+| **Start Command** | `npm run start` |
+| **Pre-deploy / Release** | `npx prisma db push` |
+| **Health check path** | `/api/health` |
+
+**Environment:** `DATABASE_URL` (Neon pooler URL), `JWT_SECRET`, `CORS_ALLOW_VERCEL=true`, optional `CORS_ORIGIN=https://your-app.vercel.app`, `SEED_OWNER_PASSWORD`.
+
+After the first successful deploy, open **Shell** once: `npm run seed`.
+
 ### Fresh install
 
 ```powershell

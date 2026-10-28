@@ -6,8 +6,8 @@ services:
     runtime: node
     region: frankfurt
     plan: free
-    # If this API lives in a monorepo, set rootDir to e.g. softdrink-backend
-    rootDir: .
+    # Repo root (package.json here). Do NOT set to "src" — that breaks npm start paths.
+    # Monorepo only: rootDir: softdrink-backend
     buildCommand: npm ci && npm run build
     preDeployCommand: npx prisma db push
     startCommand: npm run start
