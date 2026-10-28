@@ -40,6 +40,13 @@ console.log('[render-build] cwd:', process.cwd());
 const env = { ...process.env, NPM_CONFIG_PRODUCTION: 'false' };
 
 execSync('npm ci --include=dev', { cwd: repoRoot, stdio: 'inherit', env });
+
+// Fresh clones have no dist/; a committed *.tsbuildinfo makes tsc skip emit.
+for (const name of ['tsconfig.build.tsbuildinfo', 'dist', join('src', 'dist')]) {
+  const p = join(repoRoot, name);
+  if (existsSync(p)) rmSync(p, { recursive: true, force: true });
+}
+
 execSync('npx nest build', { cwd: repoRoot, stdio: 'inherit', env });
 
 let mainPath = findDistMain(repoRoot);
