@@ -9,6 +9,7 @@
     "postinstall": "prisma generate",
     "start:dev": "nest start --watch",
     "build": "nest build",
+    "build:render": "node scripts/render-build.mjs",
     "start": "node scripts/start.mjs",
     "start:prod": "node scripts/start.mjs",
     "prisma:generate": "prisma generate",

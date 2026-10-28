@@ -65,9 +65,10 @@ Connect the **Soft-Backend** GitHub repo as a **Web Service**.
 
 | Setting | Value |
 |--------|--------|
-| **Root Directory** | **Leave completely empty** (delete `src` if shown). Wrong setting → `Cannot find module .../project/src/dist/main.js`. |
-| **Build Command** | `npm ci && npm run build` |
-| **Start Command** | `npm run start` or `npm run start:prod` |
+| **Root Directory** | **Leave empty** (recommended). If it is `src`, Render may **omit** `dist/` from the deploy — use the build command below. |
+| **Build Command (root empty)** | `npm run build:render` |
+| **Build Command (Root Directory = `src`)** | `cd .. && npm run build:render` |
+| **Start Command** | `npm run start:prod` |
 | **Pre-deploy / Release** | `npx prisma db push` |
 | **Health check path** | `/api/health` |
 
