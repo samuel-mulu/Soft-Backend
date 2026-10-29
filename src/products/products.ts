@@ -44,7 +44,7 @@ class UpdateProductDto {
   @IsOptional() @IsString() supplierName?: string;
 }
 
-@ApiTags('Products') @ApiBearerAuth() @Controller('products')
+@ApiTags('Products') @ApiBearerAuth() @Roles(Role.OWNER, Role.CASHIER) @Controller('products')
 export class ProductsController {
   constructor(private db: PrismaService, private inventory: InventoryService) {}
 

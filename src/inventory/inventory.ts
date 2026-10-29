@@ -25,7 +25,7 @@ export class InventoryService {
   await tx.stockMovement.create({data:{kind,productId,bottleTypeId,delta,reason,note,purchaseId,saleId,createdById:userId}});
  }
 }
-@ApiTags('Inventory') @ApiBearerAuth() @Controller('inventory')
+@ApiTags('Inventory') @ApiBearerAuth() @Roles(Role.OWNER, Role.CASHIER) @Controller('inventory')
 export class InventoryController {
  constructor(private db:PrismaService,private inventory:InventoryService){}
  @Get('empty-bottle-summary') async emptyBottleSummary(){

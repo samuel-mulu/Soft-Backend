@@ -3,10 +3,11 @@ import { BadRequestException, Body, Controller, Get, Param, Post, Query } from '
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { ArrayMinSize, IsArray, IsEnum, IsInt, IsNumberString, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
-import { BottleReason, PaymentMethod, Prisma, StockKind, StockReason } from '@prisma/client';
+import { BottleReason, PaymentMethod, Prisma, Role, StockKind, StockReason } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory';
-import { CurrentUser } from '../common/auth';
+import { CustomerLedgerService } from '../customers/customer-ledger';
+import { CurrentUser, Roles } from '../common/auth';
 import { withDatabaseRetries } from '../common/db-errors';
 const D=(n:string)=>{const v=new Prisma.Decimal(n);if(!v.isFinite()||v.isNegative())throw new BadRequestException('Invalid amount');return v;};
 class SaleLine { @IsString() productId!:string; @IsInt() @Min(1) quantity!:number; @IsOptional() @IsNumberString() unitPrice?:string; }
@@ -23,9 +24,9 @@ class SaleDto {
  @IsOptional() @IsArray() @ValidateNested({each:true}) @Type(()=>PaymentPartDto) paymentParts?:PaymentPartDto[];
  @IsOptional() @IsString() note?:string;
 }
-@ApiTags('Sales') @ApiBearerAuth() @Controller('sales')
+@ApiTags('Sales') @ApiBearerAuth() @Roles(Role.OWNER, Role.CASHIER) @Controller('sales')
 export class SalesController {
- constructor(private db:PrismaService,private inventory:InventoryService){}
+ constructor(private db:PrismaService,private inventory:InventoryService,private ledger:CustomerLedgerService){}
  @Get() list(@Query('customerId') customerId?:string){return this.db.sale.findMany({where:customerId?{customerId}:{},include:{items:{include:{product:true}},payments:true},orderBy:{createdAt:'desc'},take:100});}
  @Get(':id') get(@Param('id') id:string){return this.db.sale.findUniqueOrThrow({where:{id},include:{items:{include:{product:true}},payments:true,bottleMovements:true,customer:true}});}
  @Post() async create(@Body() dto:SaleDto,@CurrentUser() user:{id:string}){
@@ -41,16 +42,14 @@ export class SalesController {
    const subtotal=lines.reduce((v,x)=>v.add(x.lineTotal),new Prisma.Decimal(0));
    const discount=D(dto.discount||'0');if(discount.gt(subtotal))throw new BadRequestException('Discount exceeds subtotal');
    const total=subtotal.sub(discount),payment=D(dto.payment||'0');
-   if(payment.gt(total))throw new BadRequestException('Payment exceeds sale total');
+   if(!dto.customerId&&payment.gt(total))throw new BadRequestException('Payment exceeds sale total');
    if(!dto.customerId&&(payment.lt(total)||(dto.bottlesReturned||[]).length>0))throw new BadRequestException('Registered customer required for credit or bottle ledger');
    const issued=new Map<string,number>();for(const x of lines)issued.set(x.bottleTypeId,(issued.get(x.bottleTypeId)||0)+x.quantity);
    const returned=new Map<string,number>();for(const x of dto.bottlesReturned||[])returned.set(x.bottleTypeId,x.quantity);
    if(returned.size&&dto.customerId){
     const ids=[...returned.keys()];
-    const [activeBottles,sums]=await Promise.all([tx.bottleType.findMany({where:{id:{in:ids},active:true},select:{id:true}}),tx.bottleMovement.groupBy({by:['bottleTypeId'],where:{customerId:dto.customerId,bottleTypeId:{in:ids}},_sum:{delta:true}})]);
+    const activeBottles=await tx.bottleType.findMany({where:{id:{in:ids},active:true},select:{id:true}});
     if(activeBottles.length!==ids.length)throw new BadRequestException('Invalid bottle type');
-    const held=new Map(sums.map(s=>[s.bottleTypeId,s._sum.delta??0]));
-    for(const [id,qty] of returned)if((held.get(id)||0)+(issued.get(id)||0)<qty)throw new BadRequestException('Bottle return exceeds outstanding balance');
    }
    const sale=await tx.sale.create({data:{invoiceNo:`INV-${randomUUID()}`,customerId:dto.customerId,guestName:dto.guestName,createdById:user.id,subtotal,discount,total,note:dto.note,items:{create:lines.map(({bottleTypeId,...x})=>x)}}});
    for(const line of lines)await this.inventory.change(tx,{kind:StockKind.FULL_DRINK,productId:line.productId,delta:-line.quantity,reason:StockReason.SALE,saleId:sale.id,userId:user.id});

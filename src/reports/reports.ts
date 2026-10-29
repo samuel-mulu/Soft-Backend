@@ -29,4 +29,38 @@ export class ReportsController {
  @Get('customers') async customers(){const rows=await this.db.customer.findMany({select:{id:true,name:true,phone:true,status:true,sales:{where:{status:'POSTED'},select:{total:true}},payments:{select:{amount:true}},bottleMovements:{select:{bottleTypeId:true,delta:true}}}});return rows.map(x=>{const debt=x.sales.reduce((v,s)=>v.add(s.total),zero()).sub(x.payments.reduce((v,p)=>v.add(p.amount),zero()));const bottles:Record<string,number>={};for(const b of x.bottleMovements)bottles[b.bottleTypeId]=(bottles[b.bottleTypeId]||0)+b.delta;return {id:x.id,name:x.name,phone:x.phone,status:x.status,debt,bottles};});}
  @Get('stock') stock(){return this.db.stockBalance.findMany({include:{product:true,bottleType:true}});}
  @Get('daily') async daily(@Query('from') from?:string,@Query('to') to?:string){const range=dates(from,to);const sales=await this.db.sale.findMany({where:{createdAt:range,status:'POSTED'},select:{createdAt:true,total:true}});const payments=await this.db.payment.findMany({where:{createdAt:range},select:{createdAt:true,amount:true}});const byDay:Record<string,{date:string;sales:string;received:string;count:number}>={};for(const s of sales){const d=s.createdAt.toISOString().slice(0,10);byDay[d]??={date:d,sales:'0',received:'0',count:0};byDay[d].sales=new Prisma.Decimal(byDay[d].sales).add(s.total).toString();byDay[d].count++;}for(const p of payments){const d=p.createdAt.toISOString().slice(0,10);byDay[d]??={date:d,sales:'0',received:'0',count:0};byDay[d].received=new Prisma.Decimal(byDay[d].received).add(p.amount).toString();}return Object.values(byDay).sort((a,b)=>a.date.localeCompare(b.date));}
+ @Get('activity') async activity(@Query('from') from?:string,@Query('to') to?:string){
+  const range=dates(from,to);
+  const [payments,movements,sales]=await Promise.all([
+   this.db.payment.findMany({where:{createdAt:range},include:{customer:true,sale:true},orderBy:{createdAt:'desc'}}),
+   this.db.bottleMovement.findMany({where:{createdAt:range},include:{customer:true,bottleType:true},orderBy:{createdAt:'desc'}}),
+   this.db.sale.findMany({where:{createdAt:range,status:'POSTED'},include:{customer:true,payments:true},orderBy:{createdAt:'desc'}}),
+  ]);
+  type Line={id:string;at:string;date:string;customerName:string;kind:'payment'|'credit'|'bottle';label:string;received:string|null;credited:string|null;bottleDelta:number|null;bottleTypeName:string|null};
+  const lines:Line[]=[];
+  let totalReceived=zero(),totalCredited=zero(),bottlesOut=0,bottlesIn=0;
+  for(const p of payments){
+   totalReceived=totalReceived.add(p.amount);
+   const d=p.createdAt.toISOString();
+   lines.push({id:`pay-${p.id}`,at:d,date:d.slice(0,10),customerName:p.customer?.name||'—',kind:'payment',label:p.saleId?`Payment · ${p.method}`:`Balance payment · ${p.method}`,received:p.amount.toString(),credited:null,bottleDelta:null,bottleTypeName:null});
+  }
+  for(const s of sales){
+   const paid=s.payments.reduce((v,x)=>v.add(x.amount),zero());
+   const credit=s.total.sub(paid);
+   if(credit.gt(0)){
+    totalCredited=totalCredited.add(credit);
+    const d=s.createdAt.toISOString();
+    lines.push({id:`cred-${s.id}`,at:d,date:d.slice(0,10),customerName:s.customer?.name||s.guestName||'Walk-in',kind:'credit',label:`Sale credit · ${String(s.invoiceNo).slice(0,18)}`,received:null,credited:credit.toString(),bottleDelta:null,bottleTypeName:null});
+   }
+  }
+  for(const b of movements){
+   const d=b.createdAt.toISOString();
+   const delta=b.delta;
+   if(delta>0)bottlesOut+=delta;else if(delta<0)bottlesIn+=-delta;
+   const label=b.reason==='RETURN'?'Bottle return':b.reason==='SALE'?'Bottles with customer':'Bottle adjustment';
+   lines.push({id:`bot-${b.id}`,at:d,date:d.slice(0,10),customerName:b.customer.name,kind:'bottle',label,bottleDelta:delta,bottleTypeName:b.bottleType.name,received:null,credited:null});
+  }
+  lines.sort((a,b)=>b.at.localeCompare(a.at));
+  return {totals:{received:totalReceived.toString(),credited:totalCredited.toString(),bottlesOut,bottlesIn},lines};
+ }
 }

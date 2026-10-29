@@ -1,12 +1,13 @@
 import { Body, Controller, Get, Injectable, Param, Patch, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { IsBoolean, IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
 import { Role } from '@prisma/client';
 import { hash } from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { Roles } from '../common/auth';
-class CreateUserDto { @IsString() username!:string; @IsString() @MinLength(8) password!:string; @IsEnum(Role) role!:Role; }
-class UpdateUserDto { @IsOptional() @IsBoolean() active?:boolean; @IsOptional() @IsString() @MinLength(8) password?:string; }
+const STAFF_ROLES = [Role.OWNER, Role.CASHIER] as const;
+class CreateUserDto { @IsString() username!:string; @IsString() @MinLength(4) password!:string; @IsIn(STAFF_ROLES) role!:Role; }
+class UpdateUserDto { @IsOptional() @IsBoolean() active?:boolean; @IsOptional() @IsString() @MinLength(4) password?:string; }
 @ApiTags('Users') @ApiBearerAuth() @Roles(Role.OWNER) @Controller('users')
 export class UsersController {
  constructor(private db:PrismaService){}

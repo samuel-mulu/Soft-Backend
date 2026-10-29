@@ -7,7 +7,7 @@ import { InventoryService } from '../inventory/inventory';
 import { CurrentUser, Roles } from '../common/auth';
 class BottleDto { @IsString() name!:string; @IsOptional() @IsString() description?:string; @IsOptional() @IsInt() @Min(0) initialWarehouseQuantity?:number; @ValidateIf((o)=>(o.initialWarehouseQuantity??0)>0) @IsString() note?:string; }
 class UpdateBottleDto { @IsOptional() @IsString() name?:string; @IsOptional() @IsString() description?:string; @IsOptional() @IsBoolean() active?:boolean; }
-@ApiTags('Bottle types') @ApiBearerAuth() @Controller('bottle-types')
+@ApiTags('Bottle types') @ApiBearerAuth() @Roles(Role.OWNER, Role.CASHIER) @Controller('bottle-types')
 export class BottlesController {
  constructor(private db:PrismaService,private inventory:InventoryService){}
  @Get() list(){return this.db.bottleType.findMany({orderBy:{name:'asc'}});}
