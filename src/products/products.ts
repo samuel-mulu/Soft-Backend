@@ -1,10 +1,11 @@
 import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { IsBoolean, IsInt, IsNumberString, IsOptional, IsString, Min, ValidateIf } from 'class-validator';
-import { Role, StockKind, StockReason } from '@prisma/client';
+import { IsBoolean, IsEnum, IsInt, IsNumberString, IsOptional, IsString, Min, ValidateIf } from 'class-validator';
+import { PackagingKind, Role, StockKind, StockReason } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory';
 import { CurrentUser, Roles } from '../common/auth';
+import { assertProductPackaging, normalizePackagingKind } from './packaging';
 
 function formatStockNote(defaultNote: string, stockNote?: string, supplierName?: string) {
   const parts: string[] = [];
@@ -19,8 +20,13 @@ function formatStockNote(defaultNote: string, stockNote?: string, supplierName?:
 class ProductDto {
   @IsString() name!: string;
   @IsOptional() @IsString() sku?: string;
-  @ValidateIf((o) => !o.bottleName) @IsString() bottleTypeId?: string;
-  @ValidateIf((o) => !o.bottleTypeId) @IsString() bottleName?: string;
+  @IsOptional() @IsEnum(PackagingKind) packagingKind?: PackagingKind;
+  @ValidateIf((o) => normalizePackagingKind(o.packagingKind) === PackagingKind.RETURNABLE && !o.bottleName)
+  @IsString()
+  bottleTypeId?: string;
+  @ValidateIf((o) => normalizePackagingKind(o.packagingKind) === PackagingKind.RETURNABLE && !o.bottleTypeId)
+  @IsString()
+  bottleName?: string;
   @IsNumberString() sellingPrice!: string;
   @IsNumberString() defaultCost!: string;
   @IsInt() @Min(1) unitsPerCase!: number;
@@ -33,6 +39,7 @@ class ProductDto {
 class UpdateProductDto {
   @IsOptional() @IsString() name?: string;
   @IsOptional() @IsString() sku?: string;
+  @IsOptional() @IsEnum(PackagingKind) packagingKind?: PackagingKind;
   @IsOptional() @IsString() bottleTypeId?: string;
   @IsOptional() @IsNumberString() sellingPrice?: string;
   @IsOptional() @IsNumberString() defaultCost?: string;
@@ -66,18 +73,34 @@ export class ProductsController {
 
   @Roles(Role.OWNER) @Post()
   async create(@Body() dto: ProductDto, @CurrentUser() user: { id: string }) {
-    const product = await this.db.$transaction(async (tx) => {
-      let bottleTypeId = dto.bottleTypeId;
-      if (!bottleTypeId) {
-        const name = dto.bottleName?.trim();
-        if (!name) throw new BadRequestException('Choose a bottle type or enter a new bottle name');
-        const bottle = await tx.bottleType.create({ data: { name } });
-        bottleTypeId = bottle.id;
+    const packagingKind = normalizePackagingKind(dto.packagingKind);
+    if (packagingKind === PackagingKind.NONE) {
+      if (dto.bottleTypeId || dto.bottleName?.trim()) {
+        throw new BadRequestException('Unit-only products cannot specify bottle packaging');
       }
+      if (dto.syncEmptyBottleStock) {
+        throw new BadRequestException('Empty bottle stock sync applies only to returnable products');
+      }
+    }
+
+    const product = await this.db.$transaction(async (tx) => {
+      let bottleTypeId: string | null = null;
+      if (packagingKind === PackagingKind.RETURNABLE) {
+        bottleTypeId = dto.bottleTypeId ?? null;
+        if (!bottleTypeId) {
+          const name = dto.bottleName?.trim();
+          if (!name) throw new BadRequestException('Choose a bottle type or enter a new bottle name');
+          const bottle = await tx.bottleType.create({ data: { name } });
+          bottleTypeId = bottle.id;
+        }
+      }
+      assertProductPackaging(packagingKind, bottleTypeId);
+
       const created = await tx.product.create({
         data: {
           name: dto.name,
           sku: dto.sku,
+          packagingKind,
           bottleTypeId,
           sellingPrice: dto.sellingPrice,
           defaultCost: dto.defaultCost,
@@ -96,7 +119,7 @@ export class ProductsController {
           note,
           userId: user.id,
         });
-        if (dto.syncEmptyBottleStock) {
+        if (dto.syncEmptyBottleStock && bottleTypeId) {
           await this.inventory.change(tx, {
             kind: StockKind.EMPTY_BOTTLE,
             bottleTypeId,
@@ -118,8 +141,38 @@ export class ProductsController {
   @Roles(Role.OWNER) @Patch(':id')
   async update(@Param('id') id: string, @Body() dto: UpdateProductDto, @CurrentUser() user: { id: string }) {
     const product = await this.db.$transaction(async (tx) => {
-      const { addStock, stockNote, syncEmptyBottleStock, supplierName, ...data } = dto;
-      const updated = await tx.product.update({ where: { id }, data, include: { bottleType: true } });
+      const existing = await tx.product.findUniqueOrThrow({ where: { id } });
+      const { addStock, stockNote, syncEmptyBottleStock, supplierName, packagingKind, bottleTypeId, ...rest } = dto;
+
+      const nextKind = packagingKind !== undefined ? normalizePackagingKind(packagingKind) : existing.packagingKind;
+      let nextBottleTypeId = existing.bottleTypeId;
+      if (packagingKind !== undefined || bottleTypeId !== undefined) {
+        if (nextKind === PackagingKind.NONE) {
+          nextBottleTypeId = null;
+        } else {
+          nextBottleTypeId = bottleTypeId ?? existing.bottleTypeId;
+          if (!nextBottleTypeId) {
+            throw new BadRequestException('Returnable products require a bottle type');
+          }
+        }
+      }
+      assertProductPackaging(nextKind, nextBottleTypeId);
+
+      if (syncEmptyBottleStock && nextKind === PackagingKind.NONE) {
+        throw new BadRequestException('Empty bottle stock sync applies only to returnable products');
+      }
+
+      const updated = await tx.product.update({
+        where: { id },
+        data: {
+          ...rest,
+          ...(packagingKind !== undefined ? { packagingKind: nextKind } : {}),
+          ...(packagingKind !== undefined || bottleTypeId !== undefined
+            ? { bottleTypeId: nextBottleTypeId }
+            : {}),
+        },
+        include: { bottleType: true },
+      });
       if (addStock !== undefined && addStock !== 0) {
         const note = formatStockNote('Stock update', stockNote, supplierName);
         await this.inventory.change(tx, {
@@ -130,7 +183,7 @@ export class ProductsController {
           note,
           userId: user.id,
         });
-        if (syncEmptyBottleStock) {
+        if (syncEmptyBottleStock && updated.bottleTypeId) {
           await this.inventory.change(tx, {
             kind: StockKind.EMPTY_BOTTLE,
             bottleTypeId: updated.bottleTypeId,

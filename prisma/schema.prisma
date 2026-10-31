@@ -49,6 +49,11 @@ enum BottleReason {
   ADJUSTMENT
 }
 
+enum PackagingKind {
+  RETURNABLE
+  NONE
+}
+
 enum PurchaseStatus {
   RECEIVED
 }
@@ -94,8 +99,9 @@ model Product {
  id String @id @default(uuid())
  name String @unique
  sku String? @unique
- bottleTypeId String
- bottleType BottleType @relation(fields:[bottleTypeId],references:[id])
+ packagingKind PackagingKind @default(RETURNABLE)
+ bottleTypeId String?
+ bottleType BottleType? @relation(fields:[bottleTypeId],references:[id])
  sellingPrice Decimal @db.Decimal(14,2)
  defaultCost Decimal @db.Decimal(14,2)
  unitsPerCase Int @default(12)
@@ -175,6 +181,8 @@ model StockMovement {
 model Sale {
  id String @id @default(uuid())
  invoiceNo String @unique
+ idempotencyKey String? @unique
+ idempotencyPayloadHash String?
  customerId String?
  customer Customer? @relation(fields:[customerId],references:[id])
  guestName String?

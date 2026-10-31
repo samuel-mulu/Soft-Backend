@@ -36,6 +36,7 @@ Open http://localhost:4000/docs . All API endpoints are prefixed with `/api`.
 
 - Registered customers are stored in `/customers`. Guest purchases will be modeled in the sales module (B5), not as anonymous fake customer accounts.
 - `GET /customers/:id/history` is a **placeholder** until B5-B7; it does not fabricate activity.
+- Products are **returnable** (linked bottle type, customer bottle ledger on sale) or **unit-only / no returns** (water PET, cans — stock and money only).
 - The product's bottle type identifies compatible returnable packaging; no bottle liability is posted until sales/returns are built in B5-B7.
 - Full drinks and empty bottles are different inventory balances. Purchasing full drinks does not automatically increase empty bottle stock.
 - The purchases endpoint records **received stock and cost**, not supplier payments. Accounts payable and cash flow are future phases.
@@ -48,7 +49,8 @@ Open http://localhost:4000/docs . All API endpoints are prefixed with `/api`.
 
 ## B5-B9 added modules
 
-- `POST /api/sales` creates an invoice, decreases full-drink stock, issues customer bottles, accepts optional bottle returns and initial payment in one serializable transaction. Guest sales must be fully paid and cannot maintain bottle balances.
+- `POST /api/sales` creates an invoice, decreases full-drink stock, issues customer bottles, accepts optional bottle returns (including over-return) and initial payment in one serializable transaction. Optional `idempotencyKey` prevents duplicate sales on retry. Guest sales must be fully paid and cannot maintain bottle balances.
+- **Display balances (UI):** internal `moneyOutstanding = sales − payments` and bottle ledger sums are negated once for display — `−` red = customer owes, `+` green = credit/surplus.
 - `GET /api/sales`, `GET /api/sales/:id` list invoices.
 - `POST /api/payments` records later customer payments (optionally linked to an invoice); `GET /api/payments` lists receipts.
 - `POST /api/customer-bottles/returns`, `GET /api/customer-bottles/:customerId`, owner-only `POST /api/customer-bottles/corrections` manage the bottle ledger.
@@ -57,7 +59,7 @@ Open http://localhost:4000/docs . All API endpoints are prefixed with `/api`.
 - Owner-only `GET /api/reports/summary?from=YYYY-MM-DD&to=YYYY-MM-DD`, `/reports/daily`, `/reports/customers`, `/reports/stock` provide reporting.
 - `GET /api/customers/:id/history` includes sales, payments, bottle movements and money outstanding.
 
-**Limitations / important accounting notes:** This starter does not implement invoice voids, refunds, sale corrections, FIFO inventory valuation, formal double-entry accounting, or a customer login portal. Profit uses the recorded default product cost snapshot at sale time, not FIFO actual batch cost. Bottle corrections affect the customer ledger only; if physical warehouse bottles also change, make a separate inventory adjustment. The system assumes 1 returnable bottle per drink. For credit or bottle tracking, use a registered customer. Customer payments without `saleId` settle the overall customer balance, not a specific invoice. Date ranges are UTC. Production deployment requires testing, backups, and additional operational hardening.
+**Limitations / important accounting notes:** This starter does not implement invoice voids, refunds, sale corrections, FIFO inventory valuation, formal double-entry accounting, or a customer login portal. Profit uses the recorded default product cost snapshot at sale time, not FIFO actual batch cost. Bottle corrections affect the customer ledger only; if physical warehouse bottles also change, make a separate inventory adjustment. Returnable products assume 1 empty bottle per unit sold to a registered customer; unit-only products (`packagingKind: NONE`) never post bottle movements. For credit or bottle tracking, use a registered customer. Customer payments without `saleId` settle the overall customer balance, not a specific invoice. Date ranges are UTC. Production deployment requires testing, backups, and additional operational hardening.
 
 ## Deploy on Render
 
