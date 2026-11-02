@@ -19,7 +19,7 @@ export class PortalController {
   async history(@CurrentUser() user: { id: string }) {
     const id = user.id;
     const customer = await this.db.customer.findUniqueOrThrow({ where: { id } });
-    const [sales, payments, bottles, moneyOutstanding, bottleBalances, bottleTypes] =
+    const [sales, payments, bottles, moneyBreakdown, bottleBalances, bottleTypes] =
       await Promise.all([
         this.db.sale.findMany({
           where: { customerId: id },
@@ -32,10 +32,19 @@ export class PortalController {
           include: { bottleType: true },
           orderBy: { createdAt: 'desc' },
         }),
-        this.ledger.moneyOutstanding(id),
+        this.ledger.moneyBreakdown(id),
         this.ledger.bottleBalances(id),
         this.db.bottleType.findMany({ where: { active: true }, select: { id: true, name: true } }),
       ]);
-    return { customer, sales, payments, bottles, moneyOutstanding, bottleBalances, bottleTypes };
+    return {
+      customer,
+      sales,
+      payments,
+      bottles,
+      moneyBreakdown,
+      moneyOutstanding: moneyBreakdown.moneyOutstanding,
+      bottleBalances,
+      bottleTypes,
+    };
   }
 }

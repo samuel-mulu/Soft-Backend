@@ -4,6 +4,7 @@ import { IsBoolean, IsEnum, IsInt, IsNumberString, IsOptional, IsString, Min, Va
 import { PackagingKind, Role, StockKind, StockReason } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory';
+import { StockReceivingService } from '../inventory/stock-receiving.service';
 import { CurrentUser, Roles } from '../common/auth';
 import { assertProductPackaging, normalizePackagingKind } from './packaging';
 
@@ -31,6 +32,10 @@ class ProductDto {
   @IsNumberString() defaultCost!: string;
   @IsInt() @Min(1) unitsPerCase!: number;
   @IsOptional() @IsInt() @Min(0) initialQuantity?: number;
+  /** When set with returnable product, fill from warehouse empties instead of supplier/adjustment. */
+  @IsOptional() @IsInt() @Min(0) initialFromExistingEmpties?: number;
+  @IsOptional() @IsString() initialSupplierId?: string;
+  @IsOptional() @IsNumberString() initialUnitCost?: string;
   @IsOptional() @IsBoolean() syncEmptyBottleStock?: boolean;
   @IsOptional() @IsString() supplierName?: string;
   @IsOptional() @IsString() stockNote?: string;
@@ -53,7 +58,11 @@ class UpdateProductDto {
 
 @ApiTags('Products') @ApiBearerAuth() @Roles(Role.OWNER, Role.CASHIER) @Controller('products')
 export class ProductsController {
-  constructor(private db: PrismaService, private inventory: InventoryService) {}
+  constructor(
+    private db: PrismaService,
+    private inventory: InventoryService,
+    private stockReceiving: StockReceivingService,
+  ) {}
 
   @Get()
   async list(@Query('search') search?: string) {
@@ -69,7 +78,7 @@ export class ProductsController {
     return products.map((p) => ({ ...p, stock: stock.get(p.id) ?? 0 }));
   }
 
-  private txOptions = { timeout: 20_000, maxWait: 10_000 };
+  private txOptions = { timeout: 45_000, maxWait: 15_000 };
 
   @Roles(Role.OWNER) @Post()
   async create(@Body() dto: ProductDto, @CurrentUser() user: { id: string }) {
@@ -108,27 +117,36 @@ export class ProductsController {
         },
         include: { bottleType: true },
       });
-      const qty = dto.initialQuantity ?? 0;
-      if (qty > 0) {
-        const note = formatStockNote('Initial stock', dto.stockNote, dto.supplierName);
-        await this.inventory.change(tx, {
-          kind: StockKind.FULL_DRINK,
+      const fromExisting = dto.initialFromExistingEmpties ?? 0;
+      const withSupplier = dto.initialQuantity ?? 0;
+      const note = formatStockNote('Initial stock', dto.stockNote, dto.supplierName);
+      if (fromExisting > 0 || withSupplier > 0) {
+        const mode =
+          fromExisting > 0 && withSupplier > 0
+            ? 'MIXED_SOURCE'
+            : fromExisting > 0
+              ? 'FROM_EXISTING_EMPTIES'
+              : 'WITH_BOTTLES';
+        await this.stockReceiving.receiveFull(tx, {
           productId: created.id,
-          delta: qty,
-          reason: StockReason.OPENING,
+          mode,
+          fromExistingEmpties: fromExisting,
+          withSupplierBottles: withSupplier,
+          supplierId: dto.initialSupplierId,
+          unitCost: dto.initialUnitCost,
           note,
           userId: user.id,
         });
-        if (dto.syncEmptyBottleStock && bottleTypeId) {
-          await this.inventory.change(tx, {
-            kind: StockKind.EMPTY_BOTTLE,
-            bottleTypeId,
-            delta: qty,
-            reason: StockReason.OPENING,
-            note: `Synced from product stock · ${note}`,
-            userId: user.id,
-          });
-        }
+      }
+      if (dto.syncEmptyBottleStock && bottleTypeId && withSupplier > 0) {
+        await this.inventory.change(tx, {
+          kind: StockKind.EMPTY_BOTTLE,
+          bottleTypeId,
+          delta: withSupplier,
+          reason: StockReason.OPENING,
+          note: `Synced from product stock · ${note}`,
+          userId: user.id,
+        });
       }
       return created;
     }, this.txOptions);

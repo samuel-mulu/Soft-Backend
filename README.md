@@ -95,3 +95,9 @@ npm run start:dev
 ### Upgrade an existing B0-B4 database
 
 Back up the database first, then run `npx prisma migrate dev --name add_sales_finance_reports` in development. Use `npx prisma migrate deploy` for migrations already committed in a production environment.
+
+### Bottle lifecycle phase 2
+
+Apply `prisma/migrations/20251102120000_bottle_lifecycle_phase2` with `npx prisma migrate deploy` (production) or `npx prisma migrate dev` (local). Adds mixed receive operation fields, payment allocation rows, and `BROKEN_WAIVED` bottle reason.
+
+**Testing (speed):** Use `npm test` during development (~seconds, no database). Full `npm run test:integration` boots Nest and calls Neon for every case — often **10–20+ minutes** for all suites; run before release, not on every change. One mixed product check: `npm run test:integration:acceptance` (~1–2 min). Set `TEST_DATABASE_URL` to a disposable DB when possible; run `npx prisma db push` on that URL first.

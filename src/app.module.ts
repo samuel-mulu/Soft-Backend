@@ -15,9 +15,53 @@ import { CustomerLedgerService } from './customers/customer-ledger';
 import { BottlesController } from './bottles/bottles';
 import { ProductsController } from './products/products';
 import { InventoryController, InventoryService } from './inventory/inventory';
+import { PurchaseReceivingService } from './inventory/purchase-receiving';
+import { StockReceivingService } from './inventory/stock-receiving.service';
+import { PaymentAllocationService } from './customers/payment-allocation.service';
+import { BottleCompensationService } from './finance/bottle-compensation.service';
+import { PurchasesController } from './purchases/purchases';
+import { SuppliersController } from './suppliers/suppliers';
 import { HealthController } from './health/health';
 import { PortalController } from './portal/portal';
-@Module({imports:[ConfigModule.forRoot({isGlobal:true}),JwtModule.registerAsync({useFactory:()=>({secret:process.env.JWT_SECRET||'dev-only-change-me',signOptions:{expiresIn:'8h'}})})],
- controllers:[HealthController,AuthController,PortalController,UsersController,CustomersController,BottlesController,ProductsController,InventoryController,SalesController,PaymentsController,CustomerBottlesController,ExpensesController,ReportsController],
- providers:[PrismaService,AuthService,InventoryService,CustomerLedgerService,{provide:APP_GUARD,useClass:AuthGuard},{provide:APP_FILTER,useClass:ApiExceptionFilter}]})
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
+    JwtModule.registerAsync({
+      useFactory: () => ({
+        secret: process.env.JWT_SECRET || 'dev-only-change-me',
+        signOptions: { expiresIn: '8h' },
+      }),
+    }),
+  ],
+  controllers: [
+    HealthController,
+    AuthController,
+    PortalController,
+    UsersController,
+    CustomersController,
+    BottlesController,
+    ProductsController,
+    InventoryController,
+    SalesController,
+    PaymentsController,
+    CustomerBottlesController,
+    ExpensesController,
+    ReportsController,
+    PurchasesController,
+    SuppliersController,
+  ],
+  providers: [
+    PrismaService,
+    AuthService,
+    InventoryService,
+    PurchaseReceivingService,
+    StockReceivingService,
+    PaymentAllocationService,
+    BottleCompensationService,
+    CustomerLedgerService,
+    { provide: APP_GUARD, useClass: AuthGuard },
+    { provide: APP_FILTER, useClass: ApiExceptionFilter },
+  ],
+})
 export class AppModule {}

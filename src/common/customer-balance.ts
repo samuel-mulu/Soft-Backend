@@ -4,8 +4,9 @@ import { Prisma } from '@prisma/client';
 export function moneyOutstandingFromTotals(
   salesTotal: Prisma.Decimal,
   paymentsTotal: Prisma.Decimal,
+  compensationChargesTotal: Prisma.Decimal = new Prisma.Decimal(0),
 ): Prisma.Decimal {
-  return salesTotal.sub(paymentsTotal);
+  return salesTotal.add(compensationChargesTotal).sub(paymentsTotal);
 }
 
 export function toDisplayMoney(internal: Prisma.Decimal | number): number {

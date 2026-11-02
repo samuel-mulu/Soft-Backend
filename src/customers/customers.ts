@@ -4,19 +4,25 @@ import { IsEnum, IsOptional, IsString } from 'class-validator';
 import { CustomerStatus, Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CustomerLedgerService } from './customer-ledger';
+import { PaymentAllocationService } from './payment-allocation.service';
 import { Roles } from '../common/auth';
 import { normalizeEtPhone } from '../common/phone';
 class CustomerDto { @IsString() name!:string; @IsOptional() @IsString() phone?:string; @IsOptional() @IsString() address?:string; @IsOptional() @IsString() notes?:string; }
 class UpdateCustomerDto { @IsOptional() @IsString() name?:string; @IsOptional() @IsString() phone?:string; @IsOptional() @IsString() address?:string; @IsOptional() @IsString() notes?:string; @IsOptional() @IsEnum(CustomerStatus) status?:CustomerStatus; }
 @ApiTags('Customers') @ApiBearerAuth() @Roles(Role.OWNER, Role.CASHIER) @Controller('customers')
 export class CustomersController {
- constructor(private db:PrismaService,private ledger:CustomerLedgerService){}
+ constructor(
+  private db:PrismaService,
+  private ledger:CustomerLedgerService,
+  private paymentAllocation:PaymentAllocationService,
+ ){}
  @Get() async list(@Query('search') search?:string){
   const customers=await this.db.customer.findMany({where:search?{OR:[{name:{contains:search,mode:'insensitive'}},{phone:{contains:search}}]}:{},orderBy:{createdAt:'desc'},take:100});
-  const [grouped,salesByCustomer,paymentsByCustomer]=await Promise.all([
+  const [grouped,salesByCustomer,paymentsByCustomer,compByCustomer]=await Promise.all([
    this.db.bottleMovement.groupBy({by:['customerId','bottleTypeId'],_sum:{delta:true}}),
    this.db.sale.groupBy({by:['customerId'],where:{customerId:{not:null}},_sum:{total:true}}),
    this.db.payment.groupBy({by:['customerId'],where:{customerId:{not:null}},_sum:{amount:true}}),
+   this.db.bottleCompensation.groupBy({by:['customerId'],_sum:{totalAmount:true}}),
   ]);
   const byCustomer=new Map<string,{bottleTypeId:string;outstanding:number}[]>();
   for(const g of grouped){
@@ -28,8 +34,9 @@ export class CustomersController {
   }
   const salesMap=new Map(salesByCustomer.map(s=>[s.customerId!,s._sum.total??new Prisma.Decimal(0)]));
   const payMap=new Map(paymentsByCustomer.map(p=>[p.customerId!,p._sum.amount??new Prisma.Decimal(0)]));
+  const compMap=new Map(compByCustomer.map(c=>[c.customerId,c._sum.totalAmount??new Prisma.Decimal(0)]));
   return customers.map(c=>{
-   const moneyOutstanding=this.ledger.moneyOutstandingFromTotals(salesMap.get(c.id)??new Prisma.Decimal(0),payMap.get(c.id)??new Prisma.Decimal(0));
+   const moneyOutstanding=this.ledger.moneyOutstandingFromTotals(salesMap.get(c.id)??new Prisma.Decimal(0),payMap.get(c.id)??new Prisma.Decimal(0),compMap.get(c.id)??new Prisma.Decimal(0));
    return {...c,bottleBalances:byCustomer.get(c.id)||[],moneyOutstanding};
   });
  }
@@ -49,13 +56,21 @@ export class CustomersController {
  }
  @Get(':id/history') async history(@Param('id') id:string){
   const customer=await this.db.customer.findUniqueOrThrow({where:{id}});
-  const [sales,payments,bottles,moneyOutstanding,bottleBalances]=await Promise.all([
+  const [sales,payments,bottles,moneyBreakdown,bottleBalances,compensations,openCompensations]=await Promise.all([
    this.db.sale.findMany({where:{customerId:id},include:{items:true,payments:true},orderBy:{createdAt:'desc'}}),
-   this.db.payment.findMany({where:{customerId:id},orderBy:{createdAt:'desc'}}),
+   this.db.payment.findMany({where:{customerId:id},orderBy:{createdAt:'desc'},include:{compensationAllocations:true,bottleCompensation:{include:{bottleType:true}} }}),
    this.db.bottleMovement.findMany({where:{customerId:id},include:{bottleType:true},orderBy:{createdAt:'desc'}}),
-   this.ledger.moneyOutstanding(id),
+   this.ledger.moneyBreakdown(id),
    this.ledger.bottleBalances(id),
+   this.db.bottleCompensation.findMany({where:{customerId:id},include:{bottleType:true},orderBy:{createdAt:'desc'},take:200}),
+   this.paymentAllocation.openCompensations(this.db,id),
   ]);
-  return {customer,sales,payments,bottles,moneyOutstanding,bottleBalances};
+  const openWithType=openCompensations.map((c)=>({
+   ...c,
+   remaining:c.remaining.toString(),
+   totalAmount:c.totalAmount.toString(),
+   unitPrice:c.unitPrice.toString(),
+  }));
+  return {customer,sales,payments,bottles,moneyBreakdown,moneyOutstanding:moneyBreakdown.moneyOutstanding,bottleBalances,compensations,openCompensations:openWithType};
  }
 }

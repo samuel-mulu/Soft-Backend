@@ -17,7 +17,9 @@
     "db:deploy": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "seed": "tsx prisma/seed.ts",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand --testPathIgnorePatterns=integration.spec",
+    "test:integration": "jest --runInBand --testMatch=**/*.integration.spec.ts",
+    "test:integration:acceptance": "jest --runInBand src/products/product-create-stock.integration.spec.ts -t acceptance"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.15",

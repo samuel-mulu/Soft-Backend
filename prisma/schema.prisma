@@ -6,6 +6,7 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
 enum Role {
   OWNER
   CASHIER
@@ -20,6 +21,7 @@ enum CustomerStatus {
 enum StockKind {
   FULL_DRINK
   EMPTY_BOTTLE
+  DAMAGED_BOTTLE
 }
 
 enum StockReason {
@@ -29,6 +31,19 @@ enum StockReason {
   BOTTLE_RETURN
   ADJUSTMENT_IN
   ADJUSTMENT_OUT
+  EMPTY_TO_FULL
+  WAREHOUSE_BREAKAGE
+  CUSTOMER_BROKEN_INTAKE
+  PHYSICAL_RECONCILIATION
+}
+
+enum InventoryOperationKind {
+  RECEIVE_FULL
+  CONVERT_EMPTIES
+  RECEIVE_EMPTY
+  BREAKAGE
+  RECONCILIATION
+  COMPENSATION
 }
 
 enum SaleStatus {
@@ -43,10 +58,24 @@ enum PaymentMethod {
   OTHER
 }
 
+enum PaymentPurpose {
+  GENERAL
+  SALE
+  COMPENSATION
+}
+
 enum BottleReason {
   SALE
   RETURN
   ADJUSTMENT
+  COMPENSATION
+  BROKEN_WAIVED
+}
+
+enum BottleCompensationStatus {
+  OPEN
+  PARTIALLY_PAID
+  PAID
 }
 
 enum PackagingKind {
@@ -57,210 +86,300 @@ enum PackagingKind {
 enum PurchaseStatus {
   RECEIVED
 }
+
 model User {
- id String @id @default(uuid())
- username String @unique
- passwordHash String
- role Role @default(CASHIER)
- active Boolean @default(true)
- createdAt DateTime @default(now())
- purchases Purchase[]
- stockMovements StockMovement[]
- sales Sale[]
- payments Payment[]
- bottleMovements BottleMovement[]
- expenses Expense[]
- purchasePayments PurchasePayment[]
+  id                 String              @id @default(uuid())
+  username           String              @unique
+  passwordHash       String
+  role               Role                @default(CASHIER)
+  active             Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  purchases          Purchase[]
+  stockMovements     StockMovement[]
+  sales              Sale[]
+  payments           Payment[]
+  bottleMovements    BottleMovement[]
+  expenses           Expense[]
+  purchasePayments   PurchasePayment[]
+  inventoryOperations InventoryOperation[]
+  bottleCompensations BottleCompensation[]
 }
+
 model Customer {
- id String @id @default(uuid())
- name String
- phone String? @unique
- address String?
- status CustomerStatus @default(ACTIVE)
- notes String?
- createdAt DateTime @default(now())
- updatedAt DateTime @updatedAt
- sales Sale[]
- payments Payment[]
- bottleMovements BottleMovement[]
+  id                  String               @id @default(uuid())
+  name                String
+  phone               String?              @unique
+  address             String?
+  status              CustomerStatus       @default(ACTIVE)
+  notes               String?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  sales               Sale[]
+  payments            Payment[]
+  bottleMovements     BottleMovement[]
+  bottleCompensations BottleCompensation[]
 }
+
 model BottleType {
- id String @id @default(uuid())
- name String @unique
- description String?
- active Boolean @default(true)
- products Product[]
- stocks StockBalance[]
- movements StockMovement[]
- bottleMovements BottleMovement[]
+  id               String              @id @default(uuid())
+  name             String              @unique
+  description      String?
+  capacityLabel    String?
+  replacementPrice Decimal?            @db.Decimal(14, 2)
+  active           Boolean             @default(true)
+  products         Product[]
+  stocks           StockBalance[]
+  movements        StockMovement[]
+  bottleMovements  BottleMovement[]
+  compensations    BottleCompensation[]
 }
+
 model Product {
- id String @id @default(uuid())
- name String @unique
- sku String? @unique
- packagingKind PackagingKind @default(RETURNABLE)
- bottleTypeId String?
- bottleType BottleType? @relation(fields:[bottleTypeId],references:[id])
- sellingPrice Decimal @db.Decimal(14,2)
- defaultCost Decimal @db.Decimal(14,2)
- unitsPerCase Int @default(12)
- active Boolean @default(true)
- createdAt DateTime @default(now())
- stocks StockBalance[]
- purchaseItems PurchaseItem[]
- saleItems SaleItem[]
- movements StockMovement[]
+  id             String         @id @default(uuid())
+  name           String         @unique
+  sku            String?        @unique
+  packagingKind  PackagingKind  @default(RETURNABLE)
+  bottleTypeId   String?
+  bottleType     BottleType?    @relation(fields: [bottleTypeId], references: [id])
+  sellingPrice   Decimal        @db.Decimal(14, 2)
+  defaultCost    Decimal        @db.Decimal(14, 2)
+  unitsPerCase   Int            @default(12)
+  active         Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  stocks         StockBalance[]
+  purchaseItems  PurchaseItem[]
+  saleItems      SaleItem[]
+  movements      StockMovement[]
 }
+
 model Supplier {
- id String @id @default(uuid())
- name String @unique
- phone String?
- address String?
- active Boolean @default(true)
- createdAt DateTime @default(now())
- purchases Purchase[]
- payments PurchasePayment[]
+  id        String            @id @default(uuid())
+  name      String            @unique
+  phone     String?
+  address   String?
+  active    Boolean           @default(true)
+  createdAt DateTime          @default(now())
+  purchases Purchase[]
+  payments  PurchasePayment[]
 }
+
 model Purchase {
- id String @id @default(uuid())
- supplierId String
- supplier Supplier @relation(fields:[supplierId],references:[id])
- createdById String
- createdBy User @relation(fields:[createdById],references:[id])
- reference String? @unique
- total Decimal @db.Decimal(16,2)
- status PurchaseStatus @default(RECEIVED)
- createdAt DateTime @default(now())
- items PurchaseItem[]
- movements StockMovement[]
- payments PurchasePayment[]
+  id                     String          @id @default(uuid())
+  supplierId             String
+  supplier               Supplier        @relation(fields: [supplierId], references: [id])
+  createdById            String
+  createdBy              User            @relation(fields: [createdById], references: [id])
+  reference              String?         @unique
+  idempotencyKey         String?         @unique
+  idempotencyPayloadHash String?
+  total                  Decimal         @db.Decimal(16, 2)
+  status                 PurchaseStatus  @default(RECEIVED)
+  createdAt              DateTime        @default(now())
+  items                  PurchaseItem[]
+  movements              StockMovement[]
+  payments               PurchasePayment[]
+  inventoryOperationId   String?         @unique
+  inventoryOperation     InventoryOperation? @relation(fields: [inventoryOperationId], references: [id])
 }
+
 model PurchaseItem {
- id String @id @default(uuid())
- purchaseId String
- purchase Purchase @relation(fields:[purchaseId],references:[id])
- productId String
- product Product @relation(fields:[productId],references:[id])
- quantity Int
- unitCost Decimal @db.Decimal(14,2)
- lineTotal Decimal @db.Decimal(16,2)
+  id         String   @id @default(uuid())
+  purchaseId String
+  purchase   Purchase @relation(fields: [purchaseId], references: [id])
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id])
+  quantity   Int
+  unitCost   Decimal  @db.Decimal(14, 2)
+  lineTotal  Decimal  @db.Decimal(16, 2)
 }
+
+model InventoryOperation {
+  id                     String                 @id @default(uuid())
+  kind                   InventoryOperationKind
+  idempotencyKey         String?                @unique
+  idempotencyPayloadHash String?
+  note                   String?
+  bottleTypeId           String?
+  productId              String?
+  fromExistingEmpties    Int?
+  withSupplierBottles    Int?
+  receivedAt             DateTime?
+  createdById            String
+  createdBy              User                   @relation(fields: [createdById], references: [id])
+  createdAt              DateTime               @default(now())
+  stockMovements         StockMovement[]
+  purchase               Purchase?
+}
+
 model StockBalance {
- id String @id @default(uuid())
- kind StockKind
- productId String?
- product Product? @relation(fields:[productId],references:[id])
- bottleTypeId String?
- bottleType BottleType? @relation(fields:[bottleTypeId],references:[id])
- quantity Int @default(0)
- updatedAt DateTime @updatedAt
- @@unique([kind,productId])
- @@unique([kind,bottleTypeId])
+  id           String      @id @default(uuid())
+  kind         StockKind
+  productId    String?
+  product      Product?    @relation(fields: [productId], references: [id])
+  bottleTypeId String?
+  bottleType   BottleType? @relation(fields: [bottleTypeId], references: [id])
+  quantity     Int         @default(0)
+  updatedAt    DateTime    @updatedAt
+
+  @@unique([kind, productId])
+  @@unique([kind, bottleTypeId])
 }
+
 model StockMovement {
- id String @id @default(uuid())
- kind StockKind
- productId String?
- product Product? @relation(fields:[productId],references:[id])
- bottleTypeId String?
- bottleType BottleType? @relation(fields:[bottleTypeId],references:[id])
- delta Int
- reason StockReason
- note String?
- purchaseId String?
- saleId String?
- sale Sale? @relation(fields:[saleId],references:[id])
- purchase Purchase? @relation(fields:[purchaseId],references:[id])
- createdById String
- createdBy User @relation(fields:[createdById],references:[id])
- createdAt DateTime @default(now())
- @@index([createdAt])
+  id                   String              @id @default(uuid())
+  kind                 StockKind
+  productId            String?
+  product              Product?            @relation(fields: [productId], references: [id])
+  bottleTypeId         String?
+  bottleType           BottleType?         @relation(fields: [bottleTypeId], references: [id])
+  delta                Int
+  reason               StockReason
+  note                 String?
+  purchaseId           String?
+  saleId               String?
+  sale                 Sale?               @relation(fields: [saleId], references: [id])
+  purchase             Purchase?           @relation(fields: [purchaseId], references: [id])
+  inventoryOperationId String?
+  inventoryOperation   InventoryOperation? @relation(fields: [inventoryOperationId], references: [id])
+  createdById          String
+  createdBy            User                @relation(fields: [createdById], references: [id])
+  createdAt            DateTime            @default(now())
+
+  @@index([createdAt])
+  @@index([inventoryOperationId])
 }
 
 model Sale {
- id String @id @default(uuid())
- invoiceNo String @unique
- idempotencyKey String? @unique
- idempotencyPayloadHash String?
- customerId String?
- customer Customer? @relation(fields:[customerId],references:[id])
- guestName String?
- createdById String
- createdBy User @relation(fields:[createdById],references:[id])
- status SaleStatus @default(POSTED)
- subtotal Decimal @db.Decimal(16,2)
- discount Decimal @db.Decimal(16,2)
- total Decimal @db.Decimal(16,2)
- note String?
- createdAt DateTime @default(now())
- items SaleItem[]
- payments Payment[]
- bottleMovements BottleMovement[]
- stockMovements StockMovement[]
- @@index([customerId,createdAt])
+  id                     String           @id @default(uuid())
+  invoiceNo              String           @unique
+  idempotencyKey         String?          @unique
+  idempotencyPayloadHash String?
+  customerId             String?
+  customer               Customer?        @relation(fields: [customerId], references: [id])
+  guestName              String?
+  createdById            String
+  createdBy              User             @relation(fields: [createdById], references: [id])
+  status                 SaleStatus       @default(POSTED)
+  subtotal               Decimal          @db.Decimal(16, 2)
+  discount               Decimal          @db.Decimal(16, 2)
+  total                  Decimal          @db.Decimal(16, 2)
+  note                   String?
+  createdAt              DateTime         @default(now())
+  items                  SaleItem[]
+  payments               Payment[]
+  bottleMovements        BottleMovement[]
+  stockMovements         StockMovement[]
+
+  @@index([customerId, createdAt])
 }
+
 model SaleItem {
- id String @id @default(uuid())
- saleId String
- sale Sale @relation(fields:[saleId],references:[id])
- productId String
- product Product @relation(fields:[productId],references:[id])
- quantity Int
- unitPrice Decimal @db.Decimal(14,2)
- unitCost Decimal @db.Decimal(14,2)
- lineTotal Decimal @db.Decimal(16,2)
+  id        String  @id @default(uuid())
+  saleId    String
+  sale      Sale    @relation(fields: [saleId], references: [id])
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  quantity  Int
+  unitPrice Decimal @db.Decimal(14, 2)
+  unitCost  Decimal @db.Decimal(14, 2)
+  lineTotal Decimal @db.Decimal(16, 2)
 }
+
 model Payment {
- id String @id @default(uuid())
- customerId String?
- customer Customer? @relation(fields:[customerId],references:[id])
- saleId String?
- sale Sale? @relation(fields:[saleId],references:[id])
- amount Decimal @db.Decimal(16,2)
- method PaymentMethod @default(CASH)
- note String?
- createdById String
- createdBy User @relation(fields:[createdById],references:[id])
- createdAt DateTime @default(now())
- @@index([customerId,createdAt])
+  id                      String                         @id @default(uuid())
+  customerId              String?
+  customer                Customer?                      @relation(fields: [customerId], references: [id])
+  saleId                  String?
+  sale                    Sale?                          @relation(fields: [saleId], references: [id])
+  bottleCompensationId    String?
+  bottleCompensation      BottleCompensation?            @relation(fields: [bottleCompensationId], references: [id])
+  purpose                 PaymentPurpose                 @default(GENERAL)
+  amount                  Decimal                        @db.Decimal(16, 2)
+  allocatedToCompensation Decimal?                       @db.Decimal(16, 2)
+  allocatedToSales        Decimal?                       @db.Decimal(16, 2)
+  method                  PaymentMethod                  @default(CASH)
+  note                    String?
+  createdById             String
+  createdBy               User                           @relation(fields: [createdById], references: [id])
+  createdAt               DateTime                       @default(now())
+  compensationAllocations PaymentCompensationAllocation[]
+
+  @@index([customerId, createdAt])
 }
+
+model PaymentCompensationAllocation {
+  id                   String             @id @default(uuid())
+  paymentId            String
+  payment              Payment            @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  bottleCompensationId String
+  bottleCompensation   BottleCompensation @relation(fields: [bottleCompensationId], references: [id])
+  amount               Decimal            @db.Decimal(16, 2)
+
+  @@unique([paymentId, bottleCompensationId])
+}
+
+model BottleCompensation {
+  id                     String                   @id @default(uuid())
+  customerId             String
+  customer               Customer                 @relation(fields: [customerId], references: [id])
+  bottleTypeId           String
+  bottleType             BottleType               @relation(fields: [bottleTypeId], references: [id])
+  quantity               Int
+  unitPrice              Decimal                  @db.Decimal(14, 2)
+  totalAmount            Decimal                  @db.Decimal(16, 2)
+  status                 BottleCompensationStatus @default(OPEN)
+  idempotencyKey         String?                  @unique
+  idempotencyPayloadHash String?
+  note                   String?
+  bottleMovementId       String?                  @unique
+  bottleMovement         BottleMovement?          @relation(fields: [bottleMovementId], references: [id])
+  createdById            String
+  createdBy              User                     @relation(fields: [createdById], references: [id])
+  createdAt              DateTime                 @default(now())
+  payments               Payment[]
+  paymentAllocations     PaymentCompensationAllocation[]
+}
+
 model BottleMovement {
- id String @id @default(uuid())
- customerId String
- customer Customer @relation(fields:[customerId],references:[id])
- bottleTypeId String
- bottleType BottleType @relation(fields:[bottleTypeId],references:[id])
- saleId String?
- sale Sale? @relation(fields:[saleId],references:[id])
- delta Int
- reason BottleReason
- note String?
- createdById String
- createdBy User @relation(fields:[createdById],references:[id])
- createdAt DateTime @default(now())
- @@index([customerId,bottleTypeId,createdAt])
+  id             String              @id @default(uuid())
+  customerId     String
+  customer       Customer            @relation(fields: [customerId], references: [id])
+  bottleTypeId   String
+  bottleType     BottleType          @relation(fields: [bottleTypeId], references: [id])
+  saleId         String?
+  sale           Sale?               @relation(fields: [saleId], references: [id])
+  delta          Int
+  reason         BottleReason
+  note           String?
+  createdById    String
+  createdBy      User                @relation(fields: [createdById], references: [id])
+  createdAt      DateTime            @default(now())
+  compensation   BottleCompensation?
+
+  @@index([customerId, bottleTypeId, createdAt])
 }
+
 model Expense {
- id String @id @default(uuid())
- category String
- description String
- amount Decimal @db.Decimal(16,2)
- method PaymentMethod @default(CASH)
- createdById String
- createdBy User @relation(fields:[createdById],references:[id])
- createdAt DateTime @default(now())
+  id          String        @id @default(uuid())
+  category    String
+  description String
+  amount      Decimal       @db.Decimal(16, 2)
+  method      PaymentMethod @default(CASH)
+  createdById String
+  createdBy   User          @relation(fields: [createdById], references: [id])
+  createdAt   DateTime      @default(now())
 }
+
 model PurchasePayment {
- id String @id @default(uuid())
- purchaseId String
- purchase Purchase @relation(fields:[purchaseId],references:[id])
- supplierId String
- supplier Supplier @relation(fields:[supplierId],references:[id])
- amount Decimal @db.Decimal(16,2)
- method PaymentMethod @default(CASH)
- note String?
- createdById String
- createdBy User @relation(fields:[createdById],references:[id])
- createdAt DateTime @default(now())
+  id          String        @id @default(uuid())
+  purchaseId  String
+  purchase    Purchase      @relation(fields: [purchaseId], references: [id])
+  supplierId  String
+  supplier    Supplier      @relation(fields: [supplierId], references: [id])
+  amount      Decimal       @db.Decimal(16, 2)
+  method      PaymentMethod @default(CASH)
+  note        String?
+  createdById String
+  createdBy   User          @relation(fields: [createdById], references: [id])
+  createdAt   DateTime      @default(now())
 }
