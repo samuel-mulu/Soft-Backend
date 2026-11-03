@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { IsBoolean, IsEnum, IsInt, IsNumberString, IsOptional, IsString, Min, ValidateIf } from 'class-validator';
-import { PackagingKind, Role, StockKind, StockReason } from '@prisma/client';
+import { PackagingKind, Prisma, Role, StockKind, StockReason } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory';
 import { StockReceivingService } from '../inventory/stock-receiving.service';
@@ -51,6 +51,12 @@ class UpdateProductDto {
   @IsOptional() @IsInt() @Min(1) unitsPerCase?: number;
   @IsOptional() @IsBoolean() active?: boolean;
   @IsOptional() @IsInt() addStock?: number;
+  /** Supplier-bottled full drinks added on edit. Same meaning as create. */
+  @IsOptional() @IsInt() @Min(0) initialQuantity?: number;
+  /** Full drinks filled from warehouse empties on edit. Same meaning as create. */
+  @IsOptional() @IsInt() @Min(0) initialFromExistingEmpties?: number;
+  @IsOptional() @IsString() initialSupplierId?: string;
+  @IsOptional() @IsNumberString() initialUnitCost?: string;
   @IsOptional() @IsString() stockNote?: string;
   @IsOptional() @IsBoolean() syncEmptyBottleStock?: boolean;
   @IsOptional() @IsString() supplierName?: string;
@@ -79,6 +85,52 @@ export class ProductsController {
   }
 
   private txOptions = { timeout: 45_000, maxWait: 15_000 };
+
+  /** Same three receive modes as product create: empties, supplier bottles, or both. */
+  private async applyFullReceive(
+    tx: Prisma.TransactionClient,
+    input: {
+      productId: string;
+      bottleTypeId: string | null;
+      fromExisting: number;
+      withSupplier: number;
+      supplierId?: string;
+      unitCost?: string;
+      note: string;
+      userId: string;
+      syncEmptyBottleStock?: boolean;
+      syncReason: StockReason;
+    },
+  ) {
+    if (input.fromExisting > 0 || input.withSupplier > 0) {
+      const mode =
+        input.fromExisting > 0 && input.withSupplier > 0
+          ? 'MIXED_SOURCE'
+          : input.fromExisting > 0
+            ? 'FROM_EXISTING_EMPTIES'
+            : 'WITH_BOTTLES';
+      await this.stockReceiving.receiveFull(tx, {
+        productId: input.productId,
+        mode,
+        fromExistingEmpties: input.fromExisting,
+        withSupplierBottles: input.withSupplier,
+        supplierId: input.supplierId || undefined,
+        unitCost: input.unitCost || undefined,
+        note: input.note,
+        userId: input.userId,
+      });
+    }
+    if (input.syncEmptyBottleStock && input.bottleTypeId && input.withSupplier > 0) {
+      await this.inventory.change(tx, {
+        kind: StockKind.EMPTY_BOTTLE,
+        bottleTypeId: input.bottleTypeId,
+        delta: input.withSupplier,
+        reason: input.syncReason,
+        note: `Synced from product stock · ${input.note}`,
+        userId: input.userId,
+      });
+    }
+  }
 
   @Roles(Role.OWNER) @Post()
   async create(@Body() dto: ProductDto, @CurrentUser() user: { id: string }) {
@@ -120,34 +172,18 @@ export class ProductsController {
       const fromExisting = dto.initialFromExistingEmpties ?? 0;
       const withSupplier = dto.initialQuantity ?? 0;
       const note = formatStockNote('Initial stock', dto.stockNote, dto.supplierName);
-      if (fromExisting > 0 || withSupplier > 0) {
-        const mode =
-          fromExisting > 0 && withSupplier > 0
-            ? 'MIXED_SOURCE'
-            : fromExisting > 0
-              ? 'FROM_EXISTING_EMPTIES'
-              : 'WITH_BOTTLES';
-        await this.stockReceiving.receiveFull(tx, {
-          productId: created.id,
-          mode,
-          fromExistingEmpties: fromExisting,
-          withSupplierBottles: withSupplier,
-          supplierId: dto.initialSupplierId,
-          unitCost: dto.initialUnitCost,
-          note,
-          userId: user.id,
-        });
-      }
-      if (dto.syncEmptyBottleStock && bottleTypeId && withSupplier > 0) {
-        await this.inventory.change(tx, {
-          kind: StockKind.EMPTY_BOTTLE,
-          bottleTypeId,
-          delta: withSupplier,
-          reason: StockReason.OPENING,
-          note: `Synced from product stock · ${note}`,
-          userId: user.id,
-        });
-      }
+      await this.applyFullReceive(tx, {
+        productId: created.id,
+        bottleTypeId,
+        fromExisting,
+        withSupplier,
+        supplierId: dto.initialSupplierId,
+        unitCost: dto.initialUnitCost,
+        note,
+        userId: user.id,
+        syncEmptyBottleStock: dto.syncEmptyBottleStock,
+        syncReason: StockReason.OPENING,
+      });
       return created;
     }, this.txOptions);
     const balance = await this.db.stockBalance.findUnique({
@@ -158,9 +194,30 @@ export class ProductsController {
 
   @Roles(Role.OWNER) @Patch(':id')
   async update(@Param('id') id: string, @Body() dto: UpdateProductDto, @CurrentUser() user: { id: string }) {
+    const fromExisting = dto.initialFromExistingEmpties ?? 0;
+    const withSupplier = dto.initialQuantity ?? 0;
+    const receiving = fromExisting > 0 || withSupplier > 0;
+    if (receiving && dto.addStock !== undefined && dto.addStock !== 0) {
+      throw new BadRequestException('Send a receive or a stock adjustment, not both');
+    }
+
     const product = await this.db.$transaction(async (tx) => {
       const existing = await tx.product.findUniqueOrThrow({ where: { id } });
-      const { addStock, stockNote, syncEmptyBottleStock, supplierName, packagingKind, bottleTypeId, ...rest } = dto;
+      const {
+        addStock,
+        stockNote,
+        syncEmptyBottleStock,
+        supplierName,
+        packagingKind,
+        bottleTypeId,
+        initialQuantity: _initialQuantity,
+        initialFromExistingEmpties: _initialFromExistingEmpties,
+        initialSupplierId,
+        initialUnitCost,
+        ...rest
+      } = dto;
+      void _initialQuantity;
+      void _initialFromExistingEmpties;
 
       const nextKind = packagingKind !== undefined ? normalizePackagingKind(packagingKind) : existing.packagingKind;
       let nextBottleTypeId = existing.bottleTypeId;
@@ -191,8 +248,24 @@ export class ProductsController {
         },
         include: { bottleType: true },
       });
-      if (addStock !== undefined && addStock !== 0) {
-        const note = formatStockNote('Stock update', stockNote, supplierName);
+      const note = formatStockNote('Stock update', stockNote, supplierName);
+      if (receiving) {
+        if (updated.packagingKind !== PackagingKind.RETURNABLE || !updated.bottleTypeId) {
+          throw new BadRequestException('Receive modes apply only to returnable products with a bottle type');
+        }
+        await this.applyFullReceive(tx, {
+          productId: id,
+          bottleTypeId: updated.bottleTypeId,
+          fromExisting,
+          withSupplier,
+          supplierId: initialSupplierId,
+          unitCost: initialUnitCost,
+          note,
+          userId: user.id,
+          syncEmptyBottleStock,
+          syncReason: StockReason.ADJUSTMENT_IN,
+        });
+      } else if (addStock !== undefined && addStock !== 0) {
         await this.inventory.change(tx, {
           kind: StockKind.FULL_DRINK,
           productId: id,

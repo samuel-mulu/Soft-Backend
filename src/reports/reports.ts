@@ -2,7 +2,7 @@ import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { PaymentMethod, PaymentPurpose, Prisma, Role, StockKind, StockReason } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { Roles } from '../common/auth';
+import { CurrentUser, Roles } from '../common/auth';
 import { ledgerTotalsByBottleType } from '../customers/bottle-ledger-metrics';
 
 const zero = () => new Prisma.Decimal(0);
@@ -32,37 +32,72 @@ function parsePaymentMethod(method?: string): PaymentMethod | undefined {
 export class ReportsController {
   constructor(private db: PrismaService) {}
 
+  /** Cashiers are always scoped to themselves. Owners may pass a staff id or omit it for everyone. */
+  private async resolveReportCashier(user: { id: string; role: Role }, cashierId?: string) {
+    if (user.role === Role.CASHIER) {
+      const me = await this.db.user.findUnique({
+        where: { id: user.id },
+        select: { id: true, username: true },
+      });
+      return { id: user.id, username: me?.username ?? '' };
+    }
+    const requested = cashierId?.trim();
+    if (!requested || requested.toLowerCase() === 'all') return null;
+    const staff = await this.db.user.findUnique({
+      where: { id: requested },
+      select: { id: true, username: true, role: true },
+    });
+    if (!staff || (staff.role !== Role.CASHIER && staff.role !== Role.OWNER)) {
+      throw new BadRequestException('Unknown cashier');
+    }
+    return { id: staff.id, username: staff.username };
+  }
+
+  @Roles(Role.OWNER, Role.CASHIER)
   @Get('summary')
-  async summary(@Query('from') from?: string, @Query('to') to?: string, @Query('method') method?: string) {
+  async summary(
+    @CurrentUser() user: { id: string; role: Role },
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('method') method?: string,
+    @Query('cashierId') cashierId?: string,
+  ) {
     const range = dates(from, to);
     const payMethod = parsePaymentMethod(method);
+    const cashier = await this.resolveReportCashier(user, cashierId);
+    const staff = cashier ? { createdById: cashier.id } : {};
     const paymentWhere: Prisma.PaymentWhereInput = {
       createdAt: range,
       ...(payMethod ? { method: payMethod } : {}),
+      ...staff,
     };
     const [sales, receipts, expenses, items, compInPeriod] = await Promise.all([
       this.db.sale.aggregate({
-        where: { createdAt: range, status: 'POSTED' },
+        where: { createdAt: range, status: 'POSTED', ...staff },
         _sum: { total: true, discount: true },
         _count: true,
       }),
       this.db.payment.aggregate({ where: paymentWhere, _sum: { amount: true } }),
-      this.db.expense.aggregate({ where: { createdAt: range }, _sum: { amount: true } }),
+      this.db.expense.aggregate({ where: { createdAt: range, ...staff }, _sum: { amount: true } }),
       this.db.saleItem.findMany({
-        where: { sale: { createdAt: range, status: 'POSTED' } },
+        where: { sale: { createdAt: range, status: 'POSTED', ...staff } },
         select: { quantity: true, unitCost: true },
       }),
       this.db.bottleCompensation.aggregate({
-        where: { createdAt: range },
+        where: { createdAt: range, ...staff },
         _sum: { totalAmount: true },
         _count: true,
       }),
     ]);
     const [bottles, allSales, allPayments, allComp] = await Promise.all([
-      this.db.bottleMovement.groupBy({ by: ['bottleTypeId'], _sum: { delta: true } }),
-      this.db.sale.aggregate({ where: { status: 'POSTED' }, _sum: { total: true } }),
-      this.db.payment.aggregate({ _sum: { amount: true } }),
-      this.db.bottleCompensation.aggregate({ _sum: { totalAmount: true } }),
+      this.db.bottleMovement.groupBy({
+        by: ['bottleTypeId'],
+        where: staff.createdById ? { createdById: staff.createdById } : undefined,
+        _sum: { delta: true },
+      }),
+      this.db.sale.aggregate({ where: { status: 'POSTED', ...staff }, _sum: { total: true } }),
+      this.db.payment.aggregate({ where: staff, _sum: { amount: true } }),
+      this.db.bottleCompensation.aggregate({ where: staff, _sum: { totalAmount: true } }),
     ]);
     const revenue = sales._sum.total || zero();
     const cost = items.reduce((v, x) => v.add(x.unitCost.mul(x.quantity)), zero());
@@ -75,6 +110,7 @@ export class ReportsController {
 
     return {
       period: { from: range.gte, to: range.lte },
+      cashier: cashier ? { id: cashier.id, username: cashier.username } : null,
       paymentMethod: payMethod ?? null,
       salesCount: sales._count,
       salesRevenue: revenue,
@@ -195,28 +231,38 @@ export class ReportsController {
     return Object.values(byDay).sort((a, b) => a.date.localeCompare(b.date));
   }
 
+  @Roles(Role.OWNER, Role.CASHIER)
   @Get('activity')
-  async activity(@Query('from') from?: string, @Query('to') to?: string, @Query('method') method?: string) {
+  async activity(
+    @CurrentUser() user: { id: string; role: Role },
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('method') method?: string,
+    @Query('cashierId') cashierId?: string,
+  ) {
     const range = dates(from, to);
     const payMethod = parsePaymentMethod(method);
+    const cashier = await this.resolveReportCashier(user, cashierId);
+    const staff = cashier ? { createdById: cashier.id } : {};
     const paymentWhere: Prisma.PaymentWhereInput = {
       createdAt: range,
       ...(payMethod ? { method: payMethod } : {}),
+      ...staff,
     };
     const [payments, movements, sales] = await Promise.all([
       this.db.payment.findMany({
         where: paymentWhere,
-        include: { customer: true, sale: true, bottleCompensation: true },
+        include: { customer: true, sale: true, bottleCompensation: true, createdBy: { select: { username: true } } },
         orderBy: { createdAt: 'desc' },
       }),
       this.db.bottleMovement.findMany({
-        where: { createdAt: range },
-        include: { customer: true, bottleType: true },
+        where: { createdAt: range, ...staff },
+        include: { customer: true, bottleType: true, createdBy: { select: { username: true } } },
         orderBy: { createdAt: 'desc' },
       }),
       this.db.sale.findMany({
-        where: { createdAt: range, status: 'POSTED' },
-        include: { customer: true, payments: true },
+        where: { createdAt: range, status: 'POSTED', ...staff },
+        include: { customer: true, payments: true, createdBy: { select: { username: true } } },
         orderBy: { createdAt: 'desc' },
       }),
     ]);
@@ -226,6 +272,7 @@ export class ReportsController {
       date: string;
       customerName: string;
       kind: 'payment' | 'credit' | 'bottle';
+      cashierName: string;
       label: string;
       paymentMethod: string | null;
       received: string | null;
@@ -253,6 +300,7 @@ export class ReportsController {
         date: d.slice(0, 10),
         customerName: p.customer?.name || '—',
         kind: 'payment',
+        cashierName: p.createdBy?.username || '—',
         label,
         paymentMethod: p.method,
         received: p.amount.toString(),
@@ -273,6 +321,7 @@ export class ReportsController {
           date: d.slice(0, 10),
           customerName: s.customer?.name || s.guestName || 'Walk-in',
           kind: 'credit',
+          cashierName: s.createdBy?.username || '—',
           label: `Sale credit · ${String(s.invoiceNo).slice(0, 18)}`,
           paymentMethod: null,
           received: null,
@@ -301,6 +350,7 @@ export class ReportsController {
         date: d.slice(0, 10),
         customerName: b.customer.name,
         kind: 'bottle',
+        cashierName: b.createdBy?.username || '—',
         label,
         paymentMethod: null,
         bottleDelta: delta,
@@ -317,6 +367,7 @@ export class ReportsController {
         bottlesOut,
         bottlesIn,
       },
+      cashier: cashier ? { id: cashier.id, username: cashier.username } : null,
       paymentMethod: payMethod ?? null,
       lines,
     };

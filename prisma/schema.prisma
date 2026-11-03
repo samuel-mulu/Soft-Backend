@@ -116,8 +116,9 @@ model Customer {
   updatedAt           DateTime             @updatedAt
   sales               Sale[]
   payments            Payment[]
-  bottleMovements     BottleMovement[]
-  bottleCompensations BottleCompensation[]
+  bottleMovements       BottleMovement[]
+  bottleCompensations   BottleCompensation[]
+  inventoryOperations   InventoryOperation[]
 }
 
 model BottleType {
@@ -201,6 +202,8 @@ model InventoryOperation {
   note                   String?
   bottleTypeId           String?
   productId              String?
+  customerId             String?
+  customer               Customer?              @relation(fields: [customerId], references: [id])
   fromExistingEmpties    Int?
   withSupplierBottles    Int?
   receivedAt             DateTime?
@@ -209,6 +212,8 @@ model InventoryOperation {
   createdAt              DateTime               @default(now())
   stockMovements         StockMovement[]
   purchase               Purchase?
+
+  @@index([customerId, createdAt])
 }
 
 model StockBalance {

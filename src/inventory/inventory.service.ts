@@ -115,6 +115,7 @@ export class InventoryService {
       note?: string;
       bottleTypeId?: string;
       productId?: string;
+      customerId?: string;
       userId: string;
     },
   ) {
@@ -126,6 +127,7 @@ export class InventoryService {
         note: data.note,
         bottleTypeId: data.bottleTypeId,
         productId: data.productId,
+        customerId: data.customerId,
         createdById: data.userId,
       },
     });
@@ -243,6 +245,7 @@ export class InventoryService {
       note: input.note,
       bottleTypeId: input.bottleTypeId,
       productId: input.productId,
+      customerId: input.kind === 'CUSTOMER_BROKEN' ? input.customerId : undefined,
       userId: input.userId,
     });
 
