@@ -126,7 +126,7 @@ model BottleType {
   name             String              @unique
   description      String?
   capacityLabel    String?
-  replacementPrice Decimal?            @db.Decimal(14, 2)
+  replacementPrice Decimal?            @db.Decimal(14, 2) /// per dozen
   active           Boolean             @default(true)
   products         Product[]
   stocks           StockBalance[]
@@ -142,8 +142,8 @@ model Product {
   packagingKind  PackagingKind  @default(RETURNABLE)
   bottleTypeId   String?
   bottleType     BottleType?    @relation(fields: [bottleTypeId], references: [id])
-  sellingPrice   Decimal        @db.Decimal(14, 2)
-  defaultCost    Decimal        @db.Decimal(14, 2)
+  sellingPrice   Decimal        @db.Decimal(14, 2) /// per dozen
+  defaultCost    Decimal        @db.Decimal(14, 2) /// per dozen
   unitsPerCase   Int            @default(12)
   active         Boolean        @default(true)
   createdAt      DateTime       @default(now())
@@ -190,7 +190,7 @@ model PurchaseItem {
   productId  String
   product    Product  @relation(fields: [productId], references: [id])
   quantity   Int
-  unitCost   Decimal  @db.Decimal(14, 2)
+  unitCost   Decimal  @db.Decimal(14, 2) /// per dozen (quantity is stored in single bottles)
   lineTotal  Decimal  @db.Decimal(16, 2)
 }
 
@@ -285,8 +285,8 @@ model SaleItem {
   productId String
   product   Product @relation(fields: [productId], references: [id])
   quantity  Int
-  unitPrice Decimal @db.Decimal(14, 2)
-  unitCost  Decimal @db.Decimal(14, 2)
+  unitPrice Decimal @db.Decimal(14, 2) /// per dozen
+  unitCost  Decimal @db.Decimal(14, 2) /// per dozen
   lineTotal Decimal @db.Decimal(16, 2)
 }
 
@@ -330,7 +330,7 @@ model BottleCompensation {
   bottleTypeId           String
   bottleType             BottleType               @relation(fields: [bottleTypeId], references: [id])
   quantity               Int
-  unitPrice              Decimal                  @db.Decimal(14, 2)
+  unitPrice              Decimal                  @db.Decimal(14, 2) /// per dozen
   totalAmount            Decimal                  @db.Decimal(16, 2)
   status                 BottleCompensationStatus @default(OPEN)
   idempotencyKey         String?                  @unique

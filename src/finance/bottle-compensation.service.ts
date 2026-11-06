@@ -8,6 +8,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
+import { perDozenTotal } from '../common/pack-quantity';
 
 const zero = () => new Prisma.Decimal(0);
 
@@ -92,7 +93,7 @@ export class BottleCompensationService {
         }
 
         const unitPrice = bottleType.replacementPrice;
-        const totalAmount = unitPrice.mul(input.quantity);
+        const totalAmount = perDozenTotal(unitPrice, input.quantity);
 
         const movement = await tx.bottleMovement.create({
           data: {

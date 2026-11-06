@@ -4,6 +4,7 @@ import { PaymentMethod, PaymentPurpose, Prisma, Role, StockKind, StockReason } f
 import { PrismaService } from '../prisma/prisma.service';
 import { CurrentUser, Roles } from '../common/auth';
 import { ledgerTotalsByBottleType } from '../customers/bottle-ledger-metrics';
+import { perDozenTotal } from '../common/pack-quantity';
 
 const zero = () => new Prisma.Decimal(0);
 
@@ -100,7 +101,7 @@ export class ReportsController {
       this.db.bottleCompensation.aggregate({ where: staff, _sum: { totalAmount: true } }),
     ]);
     const revenue = sales._sum.total || zero();
-    const cost = items.reduce((v, x) => v.add(x.unitCost.mul(x.quantity)), zero());
+    const cost = items.reduce((v, x) => v.add(perDozenTotal(x.unitCost, x.quantity)), zero());
     const expenseTotal = expenses._sum.amount || zero();
     const cashIn = receipts._sum.amount || zero();
     const cashOut = expenseTotal;

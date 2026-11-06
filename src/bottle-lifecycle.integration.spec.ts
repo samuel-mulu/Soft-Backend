@@ -92,7 +92,7 @@ describe('Bottle lifecycle phase 2 (integration)', () => {
     const bottleTypeId = String(bt.id);
     await api('/inventory/receive-empty', {
       method: 'POST',
-      body: JSON.stringify({ bottleTypeId, quantity: 500, note: 'empties' }),
+      body: JSON.stringify({ bottleTypeId, quantity: 504, note: 'empties' }),
     });
     const product = await api('/products', {
       method: 'POST',
@@ -122,25 +122,25 @@ describe('Bottle lifecycle phase 2 (integration)', () => {
       body: JSON.stringify({
         productId,
         mode: 'MIXED_SOURCE',
-        fromExisting: { each: 30 },
-        withSupplier: { each: 20 },
+        fromExisting: { dozen: 2.5 },
+        withSupplier: { dozen: 1.5 },
         supplierId: String(sup.id),
         unitCost: '8.50',
         note: 'mixed',
       }),
     });
-    expect(res.totalFull).toBe(50);
+    expect(res.totalFull).toBe(48);
     const fullBal = await prisma.stockBalance.findUnique({
       where: { kind_productId: { kind: StockKind.FULL_DRINK, productId } },
     });
     const emptyBal = await prisma.stockBalance.findUnique({
       where: { kind_bottleTypeId: { kind: StockKind.EMPTY_BOTTLE, bottleTypeId } },
     });
-    expect(fullBal?.quantity).toBe(170);
-    expect(emptyBal?.quantity).toBe(350);
+    expect(fullBal?.quantity).toBe(168);
+    expect(emptyBal?.quantity).toBe(354);
     const op = await prisma.inventoryOperation.findUnique({ where: { id: String(res.operationId) } });
     expect(op?.fromExistingEmpties).toBe(30);
-    expect(op?.withSupplierBottles).toBe(20);
+    expect(op?.withSupplierBottles).toBe(18);
   }, 90000);
 
   (runIntegration ? it : it.skip)('general payment allocates compensation before drink debt', async () => {
@@ -153,13 +153,13 @@ describe('Bottle lifecycle phase 2 (integration)', () => {
       method: 'POST',
       body: JSON.stringify({
         customerId,
-        items: [{ productId, quantity: 10 }],
+        items: [{ productId, quantity: 12 }],
         payment: '0',
       }),
     });
     await api('/customer-bottles/compensations', {
       method: 'POST',
-      body: JSON.stringify({ customerId, bottleTypeId, quantity: 2, note: 'lost bottles' }),
+      body: JSON.stringify({ customerId, bottleTypeId, quantity: 6, note: 'lost bottles' }),
     });
     const pay = await api('/payments', {
       method: 'POST',
@@ -185,7 +185,7 @@ describe('Bottle lifecycle phase 2 (integration)', () => {
       method: 'POST',
       body: JSON.stringify({
         customerId,
-        items: [{ productId, quantity: 5 }],
+        items: [{ productId, quantity: 6 }],
         payment: '0',
       }),
     });
@@ -200,7 +200,7 @@ describe('Bottle lifecycle phase 2 (integration)', () => {
         kind: 'CUSTOMER_BROKEN',
         bottleTypeId,
         customerId,
-        quantity: 2,
+        quantity: 6,
         reason: 'Customer returned broken',
       }),
     });
@@ -222,7 +222,7 @@ describe('Bottle lifecycle phase 2 (integration)', () => {
       method: 'POST',
       body: JSON.stringify({
         customerId,
-        items: [{ productId, quantity: 5 }],
+        items: [{ productId, quantity: 6 }],
         payment: '0',
       }),
     });
@@ -232,7 +232,7 @@ describe('Bottle lifecycle phase 2 (integration)', () => {
         kind: 'CUSTOMER_BROKEN',
         bottleTypeId,
         customerId,
-        quantity: 2,
+        quantity: 6,
         reason: 'Approved write-off audit',
         waiveBottleLiability: true,
       }),
@@ -240,10 +240,10 @@ describe('Bottle lifecycle phase 2 (integration)', () => {
     const waived = await prisma.bottleMovement.findFirst({
       where: { customerId, reason: 'BROKEN_WAIVED' },
     });
-    expect(waived?.delta).toBe(-2);
+    expect(waived?.delta).toBe(-6);
   }, 90000);
 
-  async function receiveFromEmptiesPack(pack: { each?: number; dozen?: number }) {
+  async function receiveFromEmptiesPack(pack: { quantity?: number; dozen?: number }) {
     await truncateAll();
     const suffix = `${Date.now()}-${Math.random()}`;
     const { productId, bottleTypeId } = await seedReturnable(suffix);
@@ -261,12 +261,12 @@ describe('Bottle lifecycle phase 2 (integration)', () => {
     expect(emptyBal?.quantity).toBeLessThan(380);
   }
 
-  (runIntegration ? it : it.skip)('receive-full from empties accepts each count', () =>
-    receiveFromEmptiesPack({ each: 7 }), 90000);
+  (runIntegration ? it : it.skip)('receive-full from empties accepts bottle count in half-dozen steps', () =>
+    receiveFromEmptiesPack({ quantity: 12 }), 90000);
   (runIntegration ? it : it.skip)('receive-full from empties accepts dozen count', () =>
     receiveFromEmptiesPack({ dozen: 2 }), 90000);
-  (runIntegration ? it : it.skip)('receive-full from empties accepts mixed dozen+each', () =>
-    receiveFromEmptiesPack({ dozen: 1, each: 5 }), 90000);
+  (runIntegration ? it : it.skip)('receive-full from empties accepts half dozen count', () =>
+    receiveFromEmptiesPack({ dozen: 1.5 }), 90000);
 
   (runIntegration ? it : it.skip)('manual compensation payment creates one payment row', async () => {
     await truncateAll();
@@ -276,17 +276,17 @@ describe('Bottle lifecycle phase 2 (integration)', () => {
     const customerId = String(customer.id);
     await api('/sales', {
       method: 'POST',
-      body: JSON.stringify({ customerId, items: [{ productId, quantity: 5 }], payment: '0' }),
+      body: JSON.stringify({ customerId, items: [{ productId, quantity: 6 }], payment: '0' }),
     });
     const comp = await api('/customer-bottles/compensations', {
       method: 'POST',
-      body: JSON.stringify({ customerId, bottleTypeId, quantity: 1, note: 'one lost' }),
+      body: JSON.stringify({ customerId, bottleTypeId, quantity: 6, note: 'one lost' }),
     });
     await api('/payments', {
       method: 'POST',
       body: JSON.stringify({
         customerId,
-        amount: '25',
+        amount: '12.50',
         bottleCompensationId: String(comp.id),
       }),
     });
@@ -303,7 +303,7 @@ describe('Bottle lifecycle phase 2 (integration)', () => {
       method: 'POST',
       body: JSON.stringify({
         customerId,
-        items: [{ productId, quantity: 1 }],
+        items: [{ productId, quantity: 6 }],
         payment: '0',
       }),
     });

@@ -10,6 +10,7 @@ import { CustomerLedgerService } from '../customers/customer-ledger';
 import { CurrentUser, Roles } from '../common/auth';
 import { withDatabaseRetries } from '../common/db-errors';
 import { assertCompatibleBottleReturns } from './bottle-returns';
+import { IsHalfDozenBottles, perDozenTotal } from '../common/pack-quantity';
 
 const D = (n: string) => {
   const v = new Prisma.Decimal(n);
@@ -19,12 +20,12 @@ const D = (n: string) => {
 
 class SaleLine {
   @IsString() productId!: string;
-  @IsInt() @Min(1) quantity!: number;
+  @IsInt() @Min(6) @IsHalfDozenBottles() quantity!: number;
   @IsOptional() @IsNumberString() unitPrice?: string;
 }
 class BottleLine {
   @IsString() bottleTypeId!: string;
-  @IsInt() @Min(1) quantity!: number;
+  @IsInt() @Min(6) @IsHalfDozenBottles() quantity!: number;
 }
 class PaymentPartDto {
   @IsNumberString() amount!: string;
@@ -147,7 +148,7 @@ export class SalesController {
                 quantity: x.quantity,
                 unitPrice,
                 unitCost: p.defaultCost,
-                lineTotal: unitPrice.mul(x.quantity),
+                lineTotal: perDozenTotal(unitPrice, x.quantity),
                 packagingKind: p.packagingKind,
                 bottleTypeId: p.bottleTypeId,
               };

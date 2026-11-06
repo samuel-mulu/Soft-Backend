@@ -18,10 +18,11 @@ import { CurrentUser, Roles } from '../common/auth';
 import { Role } from '@prisma/client';
 import { InventoryService } from '../inventory/inventory.service';
 import { PurchaseReceivingService } from '../inventory/purchase-receiving';
+import { IsHalfDozenBottles, perDozenTotal } from '../common/pack-quantity';
 
 class PurchaseLineDto {
   @IsString() productId!: string;
-  @IsInt() @Min(1) quantity!: number;
+  @IsInt() @Min(6) @IsHalfDozenBottles() quantity!: number;
   @IsNumberString() unitCost!: string;
 }
 
@@ -110,7 +111,7 @@ export class PurchasesController {
           productId: item.productId,
           quantity: item.quantity,
           unitCost: new Prisma.Decimal(item.unitCost),
-          lineTotal: new Prisma.Decimal(item.unitCost).mul(item.quantity),
+          lineTotal: perDozenTotal(item.unitCost, item.quantity),
         }));
         const total = items.reduce((sum, x) => sum.add(x.lineTotal), new Prisma.Decimal(0));
 

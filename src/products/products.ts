@@ -7,6 +7,7 @@ import { InventoryService } from '../inventory/inventory';
 import { StockReceivingService } from '../inventory/stock-receiving.service';
 import { CurrentUser, Roles } from '../common/auth';
 import { assertProductPackaging, normalizePackagingKind } from './packaging';
+import { IsHalfDozenBottles } from '../common/pack-quantity';
 
 function formatStockNote(defaultNote: string, stockNote?: string, supplierName?: string) {
   const parts: string[] = [];
@@ -31,9 +32,9 @@ class ProductDto {
   @IsNumberString() sellingPrice!: string;
   @IsNumberString() defaultCost!: string;
   @IsInt() @Min(1) unitsPerCase!: number;
-  @IsOptional() @IsInt() @Min(0) initialQuantity?: number;
+  @IsOptional() @IsInt() @Min(0) @IsHalfDozenBottles() initialQuantity?: number;
   /** When set with returnable product, fill from warehouse empties instead of supplier/adjustment. */
-  @IsOptional() @IsInt() @Min(0) initialFromExistingEmpties?: number;
+  @IsOptional() @IsInt() @Min(0) @IsHalfDozenBottles() initialFromExistingEmpties?: number;
   @IsOptional() @IsString() initialSupplierId?: string;
   @IsOptional() @IsNumberString() initialUnitCost?: string;
   @IsOptional() @IsBoolean() syncEmptyBottleStock?: boolean;
@@ -50,11 +51,11 @@ class UpdateProductDto {
   @IsOptional() @IsNumberString() defaultCost?: string;
   @IsOptional() @IsInt() @Min(1) unitsPerCase?: number;
   @IsOptional() @IsBoolean() active?: boolean;
-  @IsOptional() @IsInt() addStock?: number;
+  @IsOptional() @IsInt() @IsHalfDozenBottles({ allowNegative: true }) addStock?: number;
   /** Supplier-bottled full drinks added on edit. Same meaning as create. */
-  @IsOptional() @IsInt() @Min(0) initialQuantity?: number;
+  @IsOptional() @IsInt() @Min(0) @IsHalfDozenBottles() initialQuantity?: number;
   /** Full drinks filled from warehouse empties on edit. Same meaning as create. */
-  @IsOptional() @IsInt() @Min(0) initialFromExistingEmpties?: number;
+  @IsOptional() @IsInt() @Min(0) @IsHalfDozenBottles() initialFromExistingEmpties?: number;
   @IsOptional() @IsString() initialSupplierId?: string;
   @IsOptional() @IsNumberString() initialUnitCost?: string;
   @IsOptional() @IsString() stockNote?: string;

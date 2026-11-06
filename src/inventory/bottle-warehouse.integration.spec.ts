@@ -90,7 +90,7 @@ describe('Bottle warehouse lifecycle (integration)', () => {
   }
 
   (runIntegration ? it : it.skip)(
-    'mandatory: 3000 empty → convert 2000 → sell 300 / return 100',
+    'mandatory: 3000 empty → convert 1800 → sell 300 / return 120',
     async () => {
       await truncateAll();
       const suffix = Date.now();
@@ -125,7 +125,7 @@ describe('Bottle warehouse lifecycle (integration)', () => {
         method: 'POST',
         body: JSON.stringify({
           productId,
-          quantity: 2000,
+          quantity: 1800,
           idempotencyKey: `conv-${suffix}`,
         }),
       });
@@ -140,7 +140,7 @@ describe('Bottle warehouse lifecycle (integration)', () => {
         body: JSON.stringify({
           customerId: String(customer.id),
           items: [{ productId, quantity: 300 }],
-          bottlesReturned: [{ bottleTypeId, quantity: 100 }],
+          bottlesReturned: [{ bottleTypeId, quantity: 120 }],
           payment: '0',
         }),
       });
@@ -156,9 +156,9 @@ describe('Bottle warehouse lifecycle (integration)', () => {
         where: { customerId: String(customer.id) },
         _sum: { delta: true },
       });
-      expect(fullBal?.quantity).toBe(1700);
-      expect(emptyBal?.quantity).toBe(1100);
-      expect(bottleSum[0]?._sum.delta).toBe(200);
+      expect(fullBal?.quantity).toBe(1500);
+      expect(emptyBal?.quantity).toBe(1320);
+      expect(bottleSum[0]?._sum.delta).toBe(180);
     },
     120000,
   );
@@ -173,7 +173,7 @@ describe('Bottle warehouse lifecycle (integration)', () => {
     const bottleTypeId = String(bt.id);
     await api('/inventory/receive-empty', {
       method: 'POST',
-      body: JSON.stringify({ bottleTypeId, quantity: 10, note: 'few' }),
+      body: JSON.stringify({ bottleTypeId, quantity: 6, note: 'few' }),
     });
     const product = await api('/products', {
       method: 'POST',
@@ -188,7 +188,7 @@ describe('Bottle warehouse lifecycle (integration)', () => {
     await expect(
       api('/inventory/convert-empties-to-full', {
         method: 'POST',
-        body: JSON.stringify({ productId: String(product.id), quantity: 50 }),
+        body: JSON.stringify({ productId: String(product.id), quantity: 12 }),
       }),
     ).rejects.toThrow(/Not enough empty/);
   }, 60000);
@@ -203,7 +203,7 @@ describe('Bottle warehouse lifecycle (integration)', () => {
     const bottleTypeId = String(bt.id);
     await api('/inventory/receive-empty', {
       method: 'POST',
-      body: JSON.stringify({ bottleTypeId, quantity: 100, note: 'e' }),
+      body: JSON.stringify({ bottleTypeId, quantity: 96, note: 'e' }),
     });
     const product = await api('/products', {
       method: 'POST',
@@ -219,15 +219,15 @@ describe('Bottle warehouse lifecycle (integration)', () => {
     const key = `idem-${suffix}`;
     await api('/inventory/convert-empties-to-full', {
       method: 'POST',
-      body: JSON.stringify({ productId, quantity: 40, idempotencyKey: key }),
+      body: JSON.stringify({ productId, quantity: 36, idempotencyKey: key }),
     });
     await api('/inventory/convert-empties-to-full', {
       method: 'POST',
-      body: JSON.stringify({ productId, quantity: 40, idempotencyKey: key }),
+      body: JSON.stringify({ productId, quantity: 36, idempotencyKey: key }),
     });
     const fullBal = await prisma.stockBalance.findUnique({
       where: { kind_productId: { kind: StockKind.FULL_DRINK, productId } },
     });
-    expect(fullBal?.quantity).toBe(40);
+    expect(fullBal?.quantity).toBe(36);
   }, 60000);
 });

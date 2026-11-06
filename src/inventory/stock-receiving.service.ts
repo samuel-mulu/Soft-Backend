@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { InventoryOperationKind, PackagingKind, Prisma, StockKind, StockReason } from '@prisma/client';
 import { InventoryService } from './inventory.service';
 import { PurchaseReceivingService } from './purchase-receiving';
+import { perDozenTotal } from '../common/pack-quantity';
 
 export type ReceiveFullMode =
   | 'FROM_EXISTING_EMPTIES'
@@ -130,7 +131,7 @@ export class StockReceivingService {
     if (withSupplier > 0) {
       if (input.supplierId) {
         const unitCost = new Prisma.Decimal(input.unitCost!);
-        const lineTotal = unitCost.mul(withSupplier);
+        const lineTotal = perDozenTotal(unitCost, withSupplier);
         const supplier = await tx.supplier.findUnique({ where: { id: input.supplierId } });
         if (!supplier?.active) throw new BadRequestException('Invalid supplier');
 

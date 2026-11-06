@@ -5,12 +5,13 @@ import { Role, StockKind, StockReason } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory';
 import { CurrentUser, Roles } from '../common/auth';
+import { IsHalfDozenBottles } from '../common/pack-quantity';
 class BottleDto {
   @IsString() name!: string;
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsString() capacityLabel?: string;
   @IsOptional() @IsNumberString() replacementPrice?: string;
-  @IsOptional() @IsInt() @Min(0) initialWarehouseQuantity?: number;
+  @IsOptional() @IsInt() @Min(0) @IsHalfDozenBottles() initialWarehouseQuantity?: number;
   @ValidateIf((o) => (o.initialWarehouseQuantity ?? 0) > 0) @IsString() note?: string;
 }
 class UpdateBottleDto {

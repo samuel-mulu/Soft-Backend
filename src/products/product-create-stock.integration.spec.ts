@@ -78,7 +78,7 @@ describe('Product create initial stock (integration)', () => {
     return JSON.parse(text) as Record<string, unknown>;
   }
 
-  (runIntegration ? it : it.skip)('acceptance: 3000 empty → create product mixed 1000+2000', async () => {
+  (runIntegration ? it : it.skip)('acceptance: 3000 empty → create product mixed 1200+1800', async () => {
     await truncateAll();
     const suffix = Date.now();
     const bt = await api('/bottle-types', {
@@ -99,8 +99,8 @@ describe('Product create initial stock (integration)', () => {
         sellingPrice: '12',
         defaultCost: '8',
         unitsPerCase: 12,
-        initialFromExistingEmpties: 1000,
-        initialQuantity: 2000,
+        initialFromExistingEmpties: 1200,
+        initialQuantity: 1800,
         stockNote: 'Initial mixed receive',
       }),
     });
@@ -112,13 +112,13 @@ describe('Product create initial stock (integration)', () => {
     const fullBal = await prisma.stockBalance.findUnique({
       where: { kind_productId: { kind: StockKind.FULL_DRINK, productId } },
     });
-    expect(emptyBal?.quantity).toBe(2000);
+    expect(emptyBal?.quantity).toBe(1800);
     expect(fullBal?.quantity).toBe(3000);
 
     const ops = await prisma.inventoryOperation.findMany({ where: { productId } });
     expect(ops.length).toBe(1);
-    expect(ops[0]?.fromExistingEmpties).toBe(1000);
-    expect(ops[0]?.withSupplierBottles).toBe(2000);
+    expect(ops[0]?.fromExistingEmpties).toBe(1200);
+    expect(ops[0]?.withSupplierBottles).toBe(1800);
     expect(ops[0]?.kind).toBe(InventoryOperationKind.RECEIVE_FULL);
 
     const fullMovements = await prisma.stockMovement.count({
@@ -165,7 +165,7 @@ describe('Product create initial stock (integration)', () => {
     const bottleTypeId = String(bt.id);
     await api('/inventory/receive-empty', {
       method: 'POST',
-      body: JSON.stringify({ bottleTypeId, quantity: 500, note: 'e' }),
+      body: JSON.stringify({ bottleTypeId, quantity: 504, note: 'e' }),
     });
     const product = await api('/products', {
       method: 'POST',
@@ -203,7 +203,7 @@ describe('Product create initial stock (integration)', () => {
         sellingPrice: '10',
         defaultCost: '7',
         unitsPerCase: 12,
-        initialQuantity: 50,
+        initialQuantity: 48,
       }),
     });
     const productId = String(product.id);
@@ -214,7 +214,7 @@ describe('Product create initial stock (integration)', () => {
     const fullBal = await prisma.stockBalance.findUnique({
       where: { kind_productId: { kind: StockKind.FULL_DRINK, productId } },
     });
-    expect(fullBal?.quantity).toBe(50);
+    expect(fullBal?.quantity).toBe(48);
   }, 90000);
 
   (runIntegration ? it : it.skip)('edit receive uses the same three modes', async () => {
@@ -251,8 +251,8 @@ describe('Product create initial stock (integration)', () => {
         packagingKind: 'RETURNABLE',
         bottleTypeId,
         active: true,
-        initialFromExistingEmpties: 1000,
-        initialQuantity: 2000,
+        initialFromExistingEmpties: 1200,
+        initialQuantity: 1800,
         stockNote: 'Edit mixed receive',
       }),
     });
@@ -261,11 +261,11 @@ describe('Product create initial stock (integration)', () => {
     const emptyBal = await prisma.stockBalance.findUnique({
       where: { kind_bottleTypeId: { kind: StockKind.EMPTY_BOTTLE, bottleTypeId } },
     });
-    expect(emptyBal?.quantity).toBe(2000);
+    expect(emptyBal?.quantity).toBe(1800);
     const op = await prisma.inventoryOperation.findFirst({ where: { productId } });
     expect(op?.kind).toBe(InventoryOperationKind.RECEIVE_FULL);
-    expect(op?.fromExistingEmpties).toBe(1000);
-    expect(op?.withSupplierBottles).toBe(2000);
+    expect(op?.fromExistingEmpties).toBe(1200);
+    expect(op?.withSupplierBottles).toBe(1800);
 
     const removed = await api(`/products/${productId}`, {
       method: 'PATCH',
@@ -274,14 +274,14 @@ describe('Product create initial stock (integration)', () => {
         sellingPrice: '12',
         defaultCost: '8',
         unitsPerCase: 12,
-        addStock: -40,
+        addStock: -36,
       }),
     });
-    expect(n(removed.stock)).toBe(2960);
+    expect(n(removed.stock)).toBe(2964);
     const emptyAfterRemove = await prisma.stockBalance.findUnique({
       where: { kind_bottleTypeId: { kind: StockKind.EMPTY_BOTTLE, bottleTypeId } },
     });
-    expect(emptyAfterRemove?.quantity).toBe(2000);
+    expect(emptyAfterRemove?.quantity).toBe(1800);
   }, 120000);
 });
 

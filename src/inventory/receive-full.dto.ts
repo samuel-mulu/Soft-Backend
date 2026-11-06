@@ -10,7 +10,7 @@ export enum ReceiveFullMode {
 
 export class SourcePackDto extends PackQuantityDto {}
 
-/** Root-level dozen/each/quantity supported via PackQuantityDto fields on this class. */
+/** Root-level dozen/quantity supported via PackQuantityDto fields on this class. Unit cost is per dozen. */
 export class ReceiveFullDto extends PackQuantityDto {
   @IsString() productId!: string;
   @IsEnum(ReceiveFullMode) mode!: ReceiveFullMode;
@@ -35,12 +35,7 @@ export function resolveReceiveQuantities(dto: ReceiveFullDto): {
     const withSupplierBottles = dto.withSupplier ? resolveQuantityEach(dto.withSupplier) : 0;
     return { fromExistingEmpties, withSupplierBottles };
   }
-  let q = 0;
-  try {
-    q = resolveQuantityEach(dto);
-  } catch {
-    /* nested legs only */
-  }
+  const q = resolveQuantityEach(dto);
   if (dto.mode === ReceiveFullMode.FROM_EXISTING_EMPTIES) {
     return { fromExistingEmpties: q, withSupplierBottles: 0 };
   }

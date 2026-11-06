@@ -20,12 +20,13 @@ import { PackQuantityDto, resolveQuantityEach } from './quantity.dto';
 import { ledgerTotalsByBottleType } from '../customers/bottle-ledger-metrics';
 import { ReceiveFullDto, resolveReceiveQuantities } from './receive-full.dto';
 import { StockReceivingService } from './stock-receiving.service';
+import { IsHalfDozenBottles } from '../common/pack-quantity';
 
 class AdjustmentDto {
   @IsEnum(StockKind) kind!: StockKind;
   @IsOptional() @IsString() productId?: string;
   @IsOptional() @IsString() bottleTypeId?: string;
-  @IsInt() delta!: number;
+  @IsInt() @IsHalfDozenBottles({ allowNegative: true }) delta!: number;
   @IsString() note!: string;
 }
 
@@ -59,13 +60,13 @@ class BreakageDto extends PackQuantityDto {
 
 class FullCountDto {
   @IsString() productId!: string;
-  @IsInt() @Min(0) quantity!: number;
+  @IsInt() @Min(0) @IsHalfDozenBottles() quantity!: number;
 }
 
 class ReconcileDto {
   @IsString() bottleTypeId!: string;
-  @IsInt() @Min(0) countedEmpty!: number;
-  @IsInt() @Min(0) countedDamaged!: number;
+  @IsInt() @Min(0) @IsHalfDozenBottles() countedEmpty!: number;
+  @IsInt() @Min(0) @IsHalfDozenBottles() countedDamaged!: number;
   @IsArray() @ValidateNested({ each: true }) @Type(() => FullCountDto) fullCounts!: FullCountDto[];
   @IsString() note!: string;
   @IsOptional() @IsString() idempotencyKey?: string;
