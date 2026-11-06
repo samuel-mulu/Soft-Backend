@@ -1,19 +1,22 @@
 import {
-  HALF_DOZEN,
   UNITS_PER_DOZEN,
-  assertHalfDozenBottles,
+  assertPackSize,
+  assertPackStep,
   assertWholeNonNegative,
   bottlesToDozen,
   dozenToBottles,
-  isHalfDozenBottles,
+  halfDozen,
+  isPackStep,
+  isValidPackSize,
   perDozenTotal,
 } from './pack-quantity';
 
-describe('pack-quantity (backend, dozen-only)', () => {
-  it('converts dozen to bottles in half-dozen steps', () => {
+describe('pack-quantity (backend, configurable dozen)', () => {
+  it('converts dozen to bottles for 12- and 24-bottle dozens', () => {
     expect(dozenToBottles(2)).toBe(24);
     expect(dozenToBottles(2.5)).toBe(30);
-    expect(dozenToBottles(0.5)).toBe(6);
+    expect(dozenToBottles(2, 24)).toBe(48);
+    expect(dozenToBottles(0.5, 24)).toBe(12);
   });
 
   it('rejects dozen values that are not half-dozen steps', () => {
@@ -21,22 +24,35 @@ describe('pack-quantity (backend, dozen-only)', () => {
     expect(() => dozenToBottles(-1)).toThrow();
   });
 
-  it('validates bottle counts as multiples of 6', () => {
-    expect(isHalfDozenBottles(30)).toBe(true);
-    expect(isHalfDozenBottles(7)).toBe(false);
-    expect(isHalfDozenBottles(-12)).toBe(false);
-    expect(isHalfDozenBottles(-12, true)).toBe(true);
-    expect(() => assertHalfDozenBottles(7)).toThrow(/half-dozen/);
-    expect(assertHalfDozenBottles(18)).toBe(18);
+  it('half-dozen step depends on dozen size', () => {
+    expect(halfDozen(12)).toBe(6);
+    expect(halfDozen(24)).toBe(12);
+    expect(isPackStep(18, 12)).toBe(true);
+    expect(isPackStep(18, 24)).toBe(false);
+    expect(isPackStep(36, 24)).toBe(true);
+    expect(isPackStep(-12, 24)).toBe(false);
+    expect(isPackStep(-12, 24, true)).toBe(true);
+    expect(() => assertPackStep(7, 12)).toThrow(/half-dozen/);
+    expect(assertPackStep(12, 24)).toBe(12);
+  });
+
+  it('validates dozen sizes', () => {
+    expect(isValidPackSize(12)).toBe(true);
+    expect(isValidPackSize(24)).toBe(true);
+    expect(isValidPackSize(13)).toBe(false);
+    expect(isValidPackSize(0)).toBe(false);
+    expect(() => assertPackSize(7)).toThrow();
   });
 
   it('bottles to dozen', () => {
     expect(bottlesToDozen(30)).toBe(2.5);
+    expect(bottlesToDozen(60, 24)).toBe(2.5);
   });
 
-  it('per-dozen money totals are exact for whole and half dozens', () => {
+  it('per-dozen money totals use the dozen size', () => {
     expect(perDozenTotal('310', 24).toString()).toBe('620');
     expect(perDozenTotal('300', 30).toString()).toBe('750');
+    expect(perDozenTotal('480', 60, 24).toString()).toBe('1200');
     expect(perDozenTotal('25.25', 6).toString()).toBe('12.63');
   });
 
@@ -44,8 +60,7 @@ describe('pack-quantity (backend, dozen-only)', () => {
     expect(() => assertWholeNonNegative(-1)).toThrow();
   });
 
-  it('constants', () => {
+  it('default dozen is 12', () => {
     expect(UNITS_PER_DOZEN).toBe(12);
-    expect(HALF_DOZEN).toBe(6);
   });
 });

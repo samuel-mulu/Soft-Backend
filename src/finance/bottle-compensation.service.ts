@@ -93,7 +93,7 @@ export class BottleCompensationService {
         }
 
         const unitPrice = bottleType.replacementPrice;
-        const totalAmount = perDozenTotal(unitPrice, input.quantity);
+        const totalAmount = perDozenTotal(unitPrice, input.quantity, bottleType.bottlesPerDozen);
 
         const movement = await tx.bottleMovement.create({
           data: {

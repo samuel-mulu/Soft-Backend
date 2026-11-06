@@ -20,13 +20,14 @@ import { PackQuantityDto, resolveQuantityEach } from './quantity.dto';
 import { ledgerTotalsByBottleType } from '../customers/bottle-ledger-metrics';
 import { ReceiveFullDto, resolveReceiveQuantities } from './receive-full.dto';
 import { StockReceivingService } from './stock-receiving.service';
-import { IsHalfDozenBottles } from '../common/pack-quantity';
+import { assertPackStep } from '../common/pack-quantity';
+import { bottleTypePackSize, productPackSize } from '../common/pack-size';
 
 class AdjustmentDto {
   @IsEnum(StockKind) kind!: StockKind;
   @IsOptional() @IsString() productId?: string;
   @IsOptional() @IsString() bottleTypeId?: string;
-  @IsInt() @IsHalfDozenBottles({ allowNegative: true }) delta!: number;
+  @IsInt() delta!: number;
   @IsString() note!: string;
 }
 
@@ -60,13 +61,13 @@ class BreakageDto extends PackQuantityDto {
 
 class FullCountDto {
   @IsString() productId!: string;
-  @IsInt() @Min(0) @IsHalfDozenBottles() quantity!: number;
+  @IsInt() @Min(0) quantity!: number;
 }
 
 class ReconcileDto {
   @IsString() bottleTypeId!: string;
-  @IsInt() @Min(0) @IsHalfDozenBottles() countedEmpty!: number;
-  @IsInt() @Min(0) @IsHalfDozenBottles() countedDamaged!: number;
+  @IsInt() @Min(0) countedEmpty!: number;
+  @IsInt() @Min(0) countedDamaged!: number;
   @IsArray() @ValidateNested({ each: true }) @Type(() => FullCountDto) fullCounts!: FullCountDto[];
   @IsString() note!: string;
   @IsOptional() @IsString() idempotencyKey?: string;
@@ -104,6 +105,7 @@ export class InventoryController {
       return {
         bottleTypeId: b.id,
         name: b.name,
+        bottlesPerDozen: b.bottlesPerDozen,
         warehouse: warehouse.get(b.id) ?? 0,
         damaged: damaged.get(b.id) ?? 0,
         customerLedgerNetInternal: l.netInternal,
@@ -115,6 +117,9 @@ export class InventoryController {
       totals: {
         warehouse: rows.reduce((s, r) => s + r.warehouse, 0),
         damaged: rows.reduce((s, r) => s + r.damaged, 0),
+        /** Totals in dozens (each bottle type counted with its own dozen size). */
+        warehouseDozen: rows.reduce((s, r) => s + r.warehouse / r.bottlesPerDozen, 0),
+        damagedDozen: rows.reduce((s, r) => s + r.damaged / r.bottlesPerDozen, 0),
       },
       rows,
       disclaimer:
@@ -128,7 +133,9 @@ export class InventoryController {
     const [bottleTypes, balances] = await Promise.all([
       this.db.bottleType.findMany({ where: { active: true }, orderBy: { name: 'asc' } }),
       this.db.stockBalance.findMany({
-        include: { product: { select: { id: true, name: true, bottleTypeId: true, active: true } } },
+        include: {
+          product: { select: { id: true, name: true, bottleTypeId: true, active: true, unitsPerCase: true } },
+        },
       }),
     ]);
 
@@ -140,6 +147,7 @@ export class InventoryController {
       name: string;
       bottleTypeId: string | null;
       quantity: number;
+      bottlesPerDozen: number;
     }[] = [];
 
     for (const b of balances) {
@@ -155,6 +163,7 @@ export class InventoryController {
           name: b.product!.name,
           bottleTypeId: b.product!.bottleTypeId,
           quantity: b.quantity,
+          bottlesPerDozen: b.product!.unitsPerCase,
         });
         if (b.product!.bottleTypeId) {
           fullByType.set(
@@ -171,6 +180,7 @@ export class InventoryController {
       bottleTypeId: bt.id,
       name: bt.name,
       capacityLabel: bt.capacityLabel,
+      bottlesPerDozen: bt.bottlesPerDozen,
       empty: emptyByType.get(bt.id) ?? 0,
       damaged: damagedByType.get(bt.id) ?? 0,
       fullDrinks: fullByType.get(bt.id) ?? 0,
@@ -187,6 +197,7 @@ export class InventoryController {
         productId: b.productId!,
         name: b.product!.name,
         quantity: b.quantity,
+        bottlesPerDozen: b.product!.unitsPerCase,
       }));
 
     const totalEmpty = rows.reduce((s, r) => s + r.empty, 0);
@@ -196,7 +207,17 @@ export class InventoryController {
       nonReturnableFull.reduce((s, p) => s + p.quantity, 0);
 
     return {
-      totals: { empty: totalEmpty, damaged: totalDamaged, fullDrinks: totalFull },
+      totals: {
+        empty: totalEmpty,
+        damaged: totalDamaged,
+        fullDrinks: totalFull,
+        /** Totals in dozens (each item counted with its own dozen size). */
+        emptyDozen: rows.reduce((s, r) => s + r.empty / r.bottlesPerDozen, 0),
+        damagedDozen: rows.reduce((s, r) => s + r.damaged / r.bottlesPerDozen, 0),
+        fullDrinksDozen:
+          rows.reduce((s, r) => s + r.fullDrinks / r.bottlesPerDozen, 0) +
+          nonReturnableFull.reduce((s, p) => s + p.quantity / p.bottlesPerDozen, 0),
+      },
       rows,
       fullProducts,
       nonReturnableFull,
@@ -302,6 +323,12 @@ export class InventoryController {
     if (dto.kind === StockKind.DAMAGED_BOTTLE && !dto.bottleTypeId) {
       throw new BadRequestException('bottleTypeId required');
     }
+    const adjustSize = dto.productId
+      ? await productPackSize(this.db, dto.productId)
+      : dto.bottleTypeId
+        ? await bottleTypePackSize(this.db, dto.bottleTypeId)
+        : null;
+    if (adjustSize) assertPackStep(dto.delta, adjustSize, 'delta', { allowNegative: true });
     return this.db.$transaction(async (tx) => {
       await this.inventory.change(tx, {
         ...dto,
@@ -315,7 +342,10 @@ export class InventoryController {
   @Roles(Role.OWNER)
   @Post('receive-full')
   async receiveFull(@Body() dto: ReceiveFullDto, @CurrentUser() user: { id: string }) {
-    const { fromExistingEmpties, withSupplierBottles } = resolveReceiveQuantities(dto);
+    const { fromExistingEmpties, withSupplierBottles } = resolveReceiveQuantities(
+      dto,
+      await productPackSize(this.db, dto.productId),
+    );
     const payloadHash = dto.idempotencyKey
       ? this.inventory.payloadHash({ ...dto, fromExistingEmpties, withSupplierBottles })
       : undefined;
@@ -352,7 +382,7 @@ export class InventoryController {
   @Roles(Role.OWNER)
   @Post('receive-empty')
   async receiveEmpty(@Body() dto: ReceiveEmptyDto, @CurrentUser() user: { id: string }) {
-    const quantity = resolveQuantityEach(dto);
+    const quantity = resolveQuantityEach(dto, await bottleTypePackSize(this.db, dto.bottleTypeId));
     if (!dto.note.trim()) throw new BadRequestException('Reason is required');
     const payloadHash = dto.idempotencyKey ? this.inventory.payloadHash({ ...dto, quantity }) : undefined;
     return this.db.$transaction(async (tx) => {
@@ -371,7 +401,7 @@ export class InventoryController {
   @Roles(Role.OWNER)
   @Post('convert-empties-to-full')
   async convert(@Body() dto: ConvertDto, @CurrentUser() user: { id: string }) {
-    const quantity = resolveQuantityEach(dto);
+    const quantity = resolveQuantityEach(dto, await productPackSize(this.db, dto.productId));
     const payloadHash = dto.idempotencyKey ? this.inventory.payloadHash({ ...dto, quantity }) : undefined;
     return this.db.$transaction(
       async (tx) => {
@@ -394,7 +424,7 @@ export class InventoryController {
   @Roles(Role.OWNER, Role.CASHIER)
   @Post('breakage')
   async breakage(@Body() dto: BreakageDto, @CurrentUser() user: { id: string; role: Role }) {
-    const quantity = resolveQuantityEach(dto);
+    const quantity = resolveQuantityEach(dto, await bottleTypePackSize(this.db, dto.bottleTypeId));
     if (!dto.reason.trim()) throw new BadRequestException('Reason is required');
     if (dto.waiveBottleLiability && user.role !== Role.OWNER) {
       throw new BadRequestException('Owner approval required to waive bottle liability');
@@ -424,6 +454,12 @@ export class InventoryController {
   @Post('reconcile')
   async reconcile(@Body() dto: ReconcileDto, @CurrentUser() user: { id: string }) {
     if (!dto.note.trim()) throw new BadRequestException('Reason is required');
+    const reconcileSize = await bottleTypePackSize(this.db, dto.bottleTypeId);
+    assertPackStep(dto.countedEmpty, reconcileSize, 'countedEmpty');
+    assertPackStep(dto.countedDamaged, reconcileSize, 'countedDamaged');
+    for (const fc of dto.fullCounts) {
+      assertPackStep(fc.quantity, await productPackSize(this.db, fc.productId), 'fullCounts.quantity');
+    }
     const payloadHash = dto.idempotencyKey ? this.inventory.payloadHash(dto) : undefined;
     return this.db.$transaction(async (tx) => {
       const op = await this.inventory.reconcilePhysical(tx, {

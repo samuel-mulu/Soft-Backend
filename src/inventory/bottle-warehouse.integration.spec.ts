@@ -230,4 +230,63 @@ describe('Bottle warehouse lifecycle (integration)', () => {
     });
     expect(fullBal?.quantity).toBe(36);
   }, 60000);
+  (runIntegration ? it : it.skip)('24-bottle dozen: steps, product size and per-dozen prices', async () => {
+    await truncateAll();
+    const suffix = Date.now();
+    const bt = await api('/bottle-types', {
+      method: 'POST',
+      body: JSON.stringify({ name: `Crate24-${suffix}`, bottlesPerDozen: 24 }),
+    });
+    const bottleTypeId = String(bt.id);
+    expect(bt.bottlesPerDozen).toBe(24);
+
+    // half dozen of a 24-pack is 12 bottles, so 18 is rejected
+    await expect(
+      api('/inventory/receive-empty', {
+        method: 'POST',
+        body: JSON.stringify({ bottleTypeId, quantity: 18, note: 'bad step' }),
+      }),
+    ).rejects.toThrow(/half-dozen/);
+    // 5 dz of 24 = 120 bottles
+    await api('/inventory/receive-empty', {
+      method: 'POST',
+      body: JSON.stringify({ bottleTypeId, dozen: 5, note: 'five crates' }),
+    });
+
+    const product = await api('/products', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: `Crate24 drink ${suffix}`,
+        bottleTypeId,
+        sellingPrice: '480',
+        defaultCost: '360',
+      }),
+    });
+    const productId = String(product.id);
+    expect(product.unitsPerCase).toBe(24);
+
+    await api('/inventory/convert-empties-to-full', {
+      method: 'POST',
+      body: JSON.stringify({ productId, dozen: 3 }),
+    });
+    const customer = await api('/customers', {
+      method: 'POST',
+      body: JSON.stringify({ name: `Crate customer ${suffix}` }),
+    });
+    // 1.5 dz of 24 = 36 bottles at 480 / dz → 720
+    const sale = await api('/sales', {
+      method: 'POST',
+      body: JSON.stringify({
+        customerId: String(customer.id),
+        items: [{ productId, quantity: 36 }],
+        payment: '0',
+      }),
+    });
+    expect(Number(sale.total)).toBe(720);
+
+    const fullBal = await prisma.stockBalance.findUnique({
+      where: { kind_productId: { kind: StockKind.FULL_DRINK, productId } },
+    });
+    expect(fullBal?.quantity).toBe(36);
+  }, 90000);
 });

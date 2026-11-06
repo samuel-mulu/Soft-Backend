@@ -127,6 +127,8 @@ model BottleType {
   description      String?
   capacityLabel    String?
   replacementPrice Decimal?            @db.Decimal(14, 2) /// per dozen
+  /// Bottles in one "dozen" (crate) of this bottle type, e.g. 12 or 24. Always even.
+  bottlesPerDozen  Int                 @default(12)
   active           Boolean             @default(true)
   products         Product[]
   stocks           StockBalance[]
@@ -144,6 +146,7 @@ model Product {
   bottleType     BottleType?    @relation(fields: [bottleTypeId], references: [id])
   sellingPrice   Decimal        @db.Decimal(14, 2) /// per dozen
   defaultCost    Decimal        @db.Decimal(14, 2) /// per dozen
+  /// Bottles per dozen. Returnable products mirror bottleType.bottlesPerDozen.
   unitsPerCase   Int            @default(12)
   active         Boolean        @default(true)
   createdAt      DateTime       @default(now())

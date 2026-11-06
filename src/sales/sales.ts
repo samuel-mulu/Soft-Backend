@@ -10,7 +10,8 @@ import { CustomerLedgerService } from '../customers/customer-ledger';
 import { CurrentUser, Roles } from '../common/auth';
 import { withDatabaseRetries } from '../common/db-errors';
 import { assertCompatibleBottleReturns } from './bottle-returns';
-import { IsHalfDozenBottles, perDozenTotal } from '../common/pack-quantity';
+import { assertPackStep, perDozenTotal } from '../common/pack-quantity';
+import { bottleTypePackSize } from '../common/pack-size';
 
 const D = (n: string) => {
   const v = new Prisma.Decimal(n);
@@ -20,12 +21,12 @@ const D = (n: string) => {
 
 class SaleLine {
   @IsString() productId!: string;
-  @IsInt() @Min(6) @IsHalfDozenBottles() quantity!: number;
+  @IsInt() @Min(1) quantity!: number;
   @IsOptional() @IsNumberString() unitPrice?: string;
 }
 class BottleLine {
   @IsString() bottleTypeId!: string;
-  @IsInt() @Min(6) @IsHalfDozenBottles() quantity!: number;
+  @IsInt() @Min(1) quantity!: number;
 }
 class PaymentPartDto {
   @IsNumberString() amount!: string;
@@ -143,12 +144,13 @@ export class SalesController {
             const lines = dto.items.map((x) => {
               const p = byId.get(x.productId)!;
               const unitPrice = x.unitPrice !== undefined ? D(x.unitPrice) : p.sellingPrice;
+              assertPackStep(x.quantity, p.unitsPerCase, 'quantity', { label: p.name });
               return {
                 productId: p.id,
                 quantity: x.quantity,
                 unitPrice,
                 unitCost: p.defaultCost,
-                lineTotal: perDozenTotal(unitPrice, x.quantity),
+                lineTotal: perDozenTotal(unitPrice, x.quantity, p.unitsPerCase),
                 packagingKind: p.packagingKind,
                 bottleTypeId: p.bottleTypeId,
               };
@@ -177,6 +179,7 @@ export class SalesController {
             }
             const returned = new Map<string, number>();
             for (const x of dto.bottlesReturned || []) {
+              assertPackStep(x.quantity, await bottleTypePackSize(tx, x.bottleTypeId), 'bottlesReturned.quantity');
               returned.set(x.bottleTypeId, x.quantity);
             }
             if (returned.size && dto.customerId) {

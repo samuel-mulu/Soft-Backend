@@ -7,7 +7,7 @@ import { InventoryService } from '../inventory/inventory';
 import { StockReceivingService } from '../inventory/stock-receiving.service';
 import { CurrentUser, Roles } from '../common/auth';
 import { assertProductPackaging, normalizePackagingKind } from './packaging';
-import { IsHalfDozenBottles } from '../common/pack-quantity';
+import { DEFAULT_PACK_SIZE, IsPackSize, assertPackStep } from '../common/pack-quantity';
 
 function formatStockNote(defaultNote: string, stockNote?: string, supplierName?: string) {
   const parts: string[] = [];
@@ -31,10 +31,11 @@ class ProductDto {
   bottleName?: string;
   @IsNumberString() sellingPrice!: string;
   @IsNumberString() defaultCost!: string;
-  @IsInt() @Min(1) unitsPerCase!: number;
-  @IsOptional() @IsInt() @Min(0) @IsHalfDozenBottles() initialQuantity?: number;
+  /** Bottles per dozen — only used for non-returnable products (returnable ones follow the bottle type). */
+  @IsOptional() @IsPackSize() unitsPerCase?: number;
+  @IsOptional() @IsInt() @Min(0) initialQuantity?: number;
   /** When set with returnable product, fill from warehouse empties instead of supplier/adjustment. */
-  @IsOptional() @IsInt() @Min(0) @IsHalfDozenBottles() initialFromExistingEmpties?: number;
+  @IsOptional() @IsInt() @Min(0) initialFromExistingEmpties?: number;
   @IsOptional() @IsString() initialSupplierId?: string;
   @IsOptional() @IsNumberString() initialUnitCost?: string;
   @IsOptional() @IsBoolean() syncEmptyBottleStock?: boolean;
@@ -49,13 +50,13 @@ class UpdateProductDto {
   @IsOptional() @IsString() bottleTypeId?: string;
   @IsOptional() @IsNumberString() sellingPrice?: string;
   @IsOptional() @IsNumberString() defaultCost?: string;
-  @IsOptional() @IsInt() @Min(1) unitsPerCase?: number;
+  @IsOptional() @IsPackSize() unitsPerCase?: number;
   @IsOptional() @IsBoolean() active?: boolean;
-  @IsOptional() @IsInt() @IsHalfDozenBottles({ allowNegative: true }) addStock?: number;
+  @IsOptional() @IsInt() addStock?: number;
   /** Supplier-bottled full drinks added on edit. Same meaning as create. */
-  @IsOptional() @IsInt() @Min(0) @IsHalfDozenBottles() initialQuantity?: number;
+  @IsOptional() @IsInt() @Min(0) initialQuantity?: number;
   /** Full drinks filled from warehouse empties on edit. Same meaning as create. */
-  @IsOptional() @IsInt() @Min(0) @IsHalfDozenBottles() initialFromExistingEmpties?: number;
+  @IsOptional() @IsInt() @Min(0) initialFromExistingEmpties?: number;
   @IsOptional() @IsString() initialSupplierId?: string;
   @IsOptional() @IsNumberString() initialUnitCost?: string;
   @IsOptional() @IsString() stockNote?: string;
@@ -152,11 +153,18 @@ export class ProductsController {
         if (!bottleTypeId) {
           const name = dto.bottleName?.trim();
           if (!name) throw new BadRequestException('Choose a bottle type or enter a new bottle name');
-          const bottle = await tx.bottleType.create({ data: { name } });
+          const bottle = await tx.bottleType.create({
+            data: { name, bottlesPerDozen: dto.unitsPerCase ?? DEFAULT_PACK_SIZE },
+          });
           bottleTypeId = bottle.id;
         }
       }
       assertProductPackaging(packagingKind, bottleTypeId);
+      const packSize = bottleTypeId
+        ? (await tx.bottleType.findUniqueOrThrow({ where: { id: bottleTypeId } })).bottlesPerDozen
+        : dto.unitsPerCase ?? DEFAULT_PACK_SIZE;
+      assertPackStep(dto.initialQuantity ?? 0, packSize, 'initialQuantity');
+      assertPackStep(dto.initialFromExistingEmpties ?? 0, packSize, 'initialFromExistingEmpties');
 
       const created = await tx.product.create({
         data: {
@@ -166,7 +174,7 @@ export class ProductsController {
           bottleTypeId,
           sellingPrice: dto.sellingPrice,
           defaultCost: dto.defaultCost,
-          unitsPerCase: dto.unitsPerCase,
+          unitsPerCase: packSize,
         },
         include: { bottleType: true },
       });
@@ -237,11 +245,18 @@ export class ProductsController {
       if (syncEmptyBottleStock && nextKind === PackagingKind.NONE) {
         throw new BadRequestException('Empty bottle stock sync applies only to returnable products');
       }
+      const packSize = nextBottleTypeId
+        ? (await tx.bottleType.findUniqueOrThrow({ where: { id: nextBottleTypeId } })).bottlesPerDozen
+        : rest.unitsPerCase ?? existing.unitsPerCase ?? DEFAULT_PACK_SIZE;
+      assertPackStep(withSupplier, packSize, 'initialQuantity');
+      assertPackStep(fromExisting, packSize, 'initialFromExistingEmpties');
+      if (addStock !== undefined) assertPackStep(addStock, packSize, 'addStock', { allowNegative: true });
 
       const updated = await tx.product.update({
         where: { id },
         data: {
           ...rest,
+          unitsPerCase: packSize,
           ...(packagingKind !== undefined ? { packagingKind: nextKind } : {}),
           ...(packagingKind !== undefined || bottleTypeId !== undefined
             ? { bottleTypeId: nextBottleTypeId }

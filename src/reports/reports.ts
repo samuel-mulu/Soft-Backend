@@ -82,7 +82,7 @@ export class ReportsController {
       this.db.expense.aggregate({ where: { createdAt: range, ...staff }, _sum: { amount: true } }),
       this.db.saleItem.findMany({
         where: { sale: { createdAt: range, status: 'POSTED', ...staff } },
-        select: { quantity: true, unitCost: true },
+        select: { quantity: true, unitCost: true, product: { select: { unitsPerCase: true } } },
       }),
       this.db.bottleCompensation.aggregate({
         where: { createdAt: range, ...staff },
@@ -101,7 +101,7 @@ export class ReportsController {
       this.db.bottleCompensation.aggregate({ where: staff, _sum: { totalAmount: true } }),
     ]);
     const revenue = sales._sum.total || zero();
-    const cost = items.reduce((v, x) => v.add(perDozenTotal(x.unitCost, x.quantity)), zero());
+    const cost = items.reduce((v, x) => v.add(perDozenTotal(x.unitCost, x.quantity, x.product.unitsPerCase)), zero());
     const expenseTotal = expenses._sum.amount || zero();
     const cashIn = receipts._sum.amount || zero();
     const cashOut = expenseTotal;
@@ -280,6 +280,8 @@ export class ReportsController {
       credited: string | null;
       bottleDelta: number | null;
       bottleTypeName: string | null;
+      /** Dozen size of the bottle type (bottleDelta is in single bottles). */
+      bottlesPerDozen?: number | null;
     };
     const lines: Line[] = [];
     let totalReceived = zero(),
@@ -356,6 +358,7 @@ export class ReportsController {
         paymentMethod: null,
         bottleDelta: delta,
         bottleTypeName: b.bottleType.name,
+        bottlesPerDozen: b.bottleType.bottlesPerDozen,
         received: null,
         credited: null,
       });

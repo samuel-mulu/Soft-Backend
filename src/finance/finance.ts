@@ -10,6 +10,7 @@ import { assertCompatibleBottleReturns } from '../sales/bottle-returns';
 import { BottleCompensationService } from './bottle-compensation.service';
 import { PaymentAllocationService } from '../customers/payment-allocation.service';
 import { PackQuantityDto, resolveQuantityEach } from '../inventory/quantity.dto';
+import { bottleTypePackSize } from '../common/pack-size';
 
 const amount = (v: string) => {
   const n = new Prisma.Decimal(v);
@@ -151,7 +152,7 @@ export class CustomerBottlesController {
   }
 
   @Post('returns') async returnBottles(@Body() dto: ReturnDto, @CurrentUser() user: { id: string }) {
-    const quantity = resolveQuantityEach(dto);
+    const quantity = resolveQuantityEach(dto, await bottleTypePackSize(this.db, dto.bottleTypeId));
     return this.db.$transaction(
       async (tx) => {
         const customer = await tx.customer.findUnique({ where: { id: dto.customerId } });
@@ -185,7 +186,7 @@ export class CustomerBottlesController {
   @Roles(Role.OWNER)
   @Post('corrections')
   async correct(@Body() dto: CorrectionDto, @CurrentUser() user: { id: string }) {
-    const quantity = resolveQuantityEach(dto);
+    const quantity = resolveQuantityEach(dto, await bottleTypePackSize(this.db, dto.bottleTypeId));
     if (!dto.reason?.trim()) throw new BadRequestException('Reason required');
     return this.db.$transaction(
       async (tx) => {
@@ -207,7 +208,7 @@ export class CustomerBottlesController {
   }
 
   @Post('compensations') async compensate(@Body() dto: CompensationDto, @CurrentUser() user: { id: string }) {
-    const quantity = resolveQuantityEach(dto);
+    const quantity = resolveQuantityEach(dto, await bottleTypePackSize(this.db, dto.bottleTypeId));
     const payloadHash = dto.idempotencyKey
       ? createHashPayload({ ...dto, quantity })
       : undefined;

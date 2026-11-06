@@ -26,16 +26,16 @@ export class ReceiveFullDto extends PackQuantityDto {
   @IsOptional() @IsString() idempotencyKey?: string;
 }
 
-export function resolveReceiveQuantities(dto: ReceiveFullDto): {
+export function resolveReceiveQuantities(dto: ReceiveFullDto, size: number): {
   fromExistingEmpties: number;
   withSupplierBottles: number;
 } {
   if (dto.mode === ReceiveFullMode.MIXED_SOURCE) {
-    const fromExistingEmpties = dto.fromExisting ? resolveQuantityEach(dto.fromExisting) : 0;
-    const withSupplierBottles = dto.withSupplier ? resolveQuantityEach(dto.withSupplier) : 0;
+    const fromExistingEmpties = dto.fromExisting ? resolveQuantityEach(dto.fromExisting, size) : 0;
+    const withSupplierBottles = dto.withSupplier ? resolveQuantityEach(dto.withSupplier, size) : 0;
     return { fromExistingEmpties, withSupplierBottles };
   }
-  const q = resolveQuantityEach(dto);
+  const q = resolveQuantityEach(dto, size);
   if (dto.mode === ReceiveFullMode.FROM_EXISTING_EMPTIES) {
     return { fromExistingEmpties: q, withSupplierBottles: 0 };
   }

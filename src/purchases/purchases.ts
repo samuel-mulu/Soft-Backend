@@ -18,11 +18,11 @@ import { CurrentUser, Roles } from '../common/auth';
 import { Role } from '@prisma/client';
 import { InventoryService } from '../inventory/inventory.service';
 import { PurchaseReceivingService } from '../inventory/purchase-receiving';
-import { IsHalfDozenBottles, perDozenTotal } from '../common/pack-quantity';
+import { assertPackStep, perDozenTotal } from '../common/pack-quantity';
 
 class PurchaseLineDto {
   @IsString() productId!: string;
-  @IsInt() @Min(6) @IsHalfDozenBottles() quantity!: number;
+  @IsInt() @Min(1) quantity!: number;
   @IsNumberString() unitCost!: string;
 }
 
@@ -107,12 +107,17 @@ export class PurchasesController {
         const products = await tx.product.findMany({ where: { id: { in: ids }, active: true } });
         if (products.length !== ids.length) throw new BadRequestException('Invalid product');
 
-        const items = dto.items.map((item) => ({
-          productId: item.productId,
-          quantity: item.quantity,
-          unitCost: new Prisma.Decimal(item.unitCost),
-          lineTotal: perDozenTotal(item.unitCost, item.quantity),
-        }));
+        const sizeById = new Map(products.map((p) => [p.id, p.unitsPerCase]));
+        const items = dto.items.map((item) => {
+          const size = sizeById.get(item.productId)!;
+          assertPackStep(item.quantity, size, 'quantity');
+          return {
+            productId: item.productId,
+            quantity: item.quantity,
+            unitCost: new Prisma.Decimal(item.unitCost),
+            lineTotal: perDozenTotal(item.unitCost, item.quantity, size),
+          };
+        });
         const total = items.reduce((sum, x) => sum.add(x.lineTotal), new Prisma.Decimal(0));
 
         const op = await this.inventory.createOperation(tx, {

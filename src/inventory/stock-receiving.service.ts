@@ -2,7 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { InventoryOperationKind, PackagingKind, Prisma, StockKind, StockReason } from '@prisma/client';
 import { InventoryService } from './inventory.service';
 import { PurchaseReceivingService } from './purchase-receiving';
-import { perDozenTotal } from '../common/pack-quantity';
+import { assertPackStep, bottlesToDozen, perDozenTotal } from '../common/pack-quantity';
 
 export type ReceiveFullMode =
   | 'FROM_EXISTING_EMPTIES'
@@ -65,11 +65,17 @@ export class StockReceivingService {
       return { operation: existing, purchaseId: purchase?.id, totalFull, fromExisting, withSupplier };
     }
 
-    const product = await tx.product.findUnique({ where: { id: input.productId } });
+    const product = await tx.product.findUnique({
+      where: { id: input.productId },
+      include: { bottleType: { select: { bottlesPerDozen: true } } },
+    });
     if (!product?.active) throw new BadRequestException('Invalid product');
     if (product.packagingKind !== PackagingKind.RETURNABLE || !product.bottleTypeId) {
       throw new BadRequestException('Product must be returnable with a bottle type');
     }
+    const packSize = product.bottleType?.bottlesPerDozen ?? product.unitsPerCase;
+    assertPackStep(fromExisting, packSize, 'fromExistingEmpties');
+    assertPackStep(withSupplier, packSize, 'withSupplierBottles');
 
     if (input.mode === 'FROM_EXISTING_EMPTIES' && input.supplierId) {
       throw new BadRequestException('Supplier not used when filling from warehouse empties only');
@@ -89,7 +95,7 @@ export class StockReceivingService {
 
     const note =
       input.note?.trim() ||
-      `Receive full: ${fromExisting} from empties, ${withSupplier} with supplier bottles`;
+      `Receive full: ${bottlesToDozen(fromExisting, packSize)} dz from empties, ${bottlesToDozen(withSupplier, packSize)} dz with supplier bottles`;
 
     const op = await tx.inventoryOperation.create({
       data: {
@@ -131,7 +137,7 @@ export class StockReceivingService {
     if (withSupplier > 0) {
       if (input.supplierId) {
         const unitCost = new Prisma.Decimal(input.unitCost!);
-        const lineTotal = perDozenTotal(unitCost, withSupplier);
+        const lineTotal = perDozenTotal(unitCost, withSupplier, packSize);
         const supplier = await tx.supplier.findUnique({ where: { id: input.supplierId } });
         if (!supplier?.active) throw new BadRequestException('Invalid supplier');
 
