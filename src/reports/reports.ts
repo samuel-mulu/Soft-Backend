@@ -90,7 +90,7 @@ export class ReportsController {
         _count: true,
       }),
     ]);
-    const [bottles, allSales, allPayments, allComp] = await Promise.all([
+    const [bottles, allSales, allPayments, allComp, openingMoneySum] = await Promise.all([
       this.db.bottleMovement.groupBy({
         by: ['bottleTypeId'],
         where: staff.createdById ? { createdById: staff.createdById } : undefined,
@@ -99,6 +99,7 @@ export class ReportsController {
       this.db.sale.aggregate({ where: { status: 'POSTED', ...staff }, _sum: { total: true } }),
       this.db.payment.aggregate({ where: staff, _sum: { amount: true } }),
       this.db.bottleCompensation.aggregate({ where: staff, _sum: { totalAmount: true } }),
+      this.db.customer.aggregate({ _sum: { openingMoney: true } }),
     ]);
     const revenue = sales._sum.total || zero();
     const cost = items.reduce((v, x) => v.add(perDozenTotal(x.unitCost, x.quantity, x.product.unitsPerCase)), zero());
@@ -107,6 +108,7 @@ export class ReportsController {
     const cashOut = expenseTotal;
     const customerReceivables = (allSales._sum.total || zero())
       .add(allComp._sum.totalAmount || zero())
+      .add(openingMoneySum._sum.openingMoney || zero())
       .sub(allPayments._sum.amount || zero());
 
     return {

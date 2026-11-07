@@ -112,6 +112,8 @@ model Customer {
   address             String?
   status              CustomerStatus       @default(ACTIVE)
   notes               String?
+  /// Opening AR from manual books (manual → digital). + = customer owed you; − = credit. Default 0.
+  openingMoney        Decimal              @default(0) @db.Decimal(16, 2)
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
   sales               Sale[]

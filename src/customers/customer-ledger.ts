@@ -11,6 +11,7 @@ export type MoneyBreakdown = {
   salesTotal: Prisma.Decimal;
   compensationChargesTotal: Prisma.Decimal;
   paymentsTotal: Prisma.Decimal;
+  openingMoney: Prisma.Decimal;
   moneyOutstanding: Prisma.Decimal;
   drinkOutstanding: Prisma.Decimal;
   compensationOutstanding: Prisma.Decimal;
@@ -28,8 +29,9 @@ export class CustomerLedgerService {
     salesTotal: Prisma.Decimal,
     paymentsTotal: Prisma.Decimal,
     compensationChargesTotal: Prisma.Decimal,
+    openingMoney: Prisma.Decimal = zero(),
   ): Prisma.Decimal {
-    return salesTotal.add(compensationChargesTotal).sub(paymentsTotal);
+    return salesTotal.add(compensationChargesTotal).add(openingMoney).sub(paymentsTotal);
   }
 
   async compensationChargesTotal(customerId: string): Promise<Prisma.Decimal> {
@@ -46,18 +48,21 @@ export class CustomerLedgerService {
   }
 
   async moneyBreakdown(customerId: string): Promise<MoneyBreakdown> {
-    const [sales, payments, compensationCharges] = await Promise.all([
+    const [sales, payments, compensationCharges, customer] = await Promise.all([
       this.db.sale.aggregate({ where: { customerId, status: 'POSTED' }, _sum: { total: true } }),
       this.db.payment.aggregate({ where: { customerId }, _sum: { amount: true } }),
       this.compensationChargesTotal(customerId),
+      this.db.customer.findUnique({ where: { id: customerId }, select: { openingMoney: true } }),
     ]);
     const salesTotal = sales._sum.total ?? zero();
     const paymentsTotal = payments._sum.amount ?? zero();
     const compensationChargesTotal = compensationCharges;
+    const openingMoney = customer?.openingMoney ?? zero();
     const moneyOutstanding = this.moneyOutstandingFromTotals(
       salesTotal,
       paymentsTotal,
       compensationChargesTotal,
+      openingMoney,
     );
 
     const open = await this.db.bottleCompensation.findMany({
@@ -100,6 +105,7 @@ export class CustomerLedgerService {
       salesTotal,
       compensationChargesTotal,
       paymentsTotal,
+      openingMoney,
       moneyOutstanding,
       drinkOutstanding,
       compensationOutstanding,

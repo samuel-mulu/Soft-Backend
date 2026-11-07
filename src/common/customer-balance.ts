@@ -1,12 +1,13 @@
 import { Prisma } from '@prisma/client';
 
-/** Internal: sales − payments. Positive = customer owes the business. */
+/** Internal: sales + compensations + opening − payments. Positive = customer owes the business. */
 export function moneyOutstandingFromTotals(
   salesTotal: Prisma.Decimal,
   paymentsTotal: Prisma.Decimal,
   compensationChargesTotal: Prisma.Decimal = new Prisma.Decimal(0),
+  openingMoney: Prisma.Decimal = new Prisma.Decimal(0),
 ): Prisma.Decimal {
-  return salesTotal.add(compensationChargesTotal).sub(paymentsTotal);
+  return salesTotal.add(compensationChargesTotal).add(openingMoney).sub(paymentsTotal);
 }
 
 export function toDisplayMoney(internal: Prisma.Decimal | number): number {
